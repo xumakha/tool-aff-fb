@@ -20,13 +20,14 @@ App giữ worker chạy trong lúc cửa sổ mở và hạn chế tự sleep; k
 
 ### Build từ mã nguồn
 
-Cần Node.js 24+. Trên Windows:
+Cần Node.js 24+ kèm npm và kết nối Internet. Trên Windows, nhấp đúp **`build-pc.cmd`** trong thư mục dự án. File tự cài dependency theo lockfile, chạy test, build Setup + Portable và mở thư mục `dist/` khi thành công. Nếu lỗi, cửa sổ giữ nguyên để đọc thông báo. Không cần đổi execution policy PowerShell.
+
+Hoặc chạy từng lệnh trong PowerShell:
 
 ```sh
-npm ci
-npm test
-npm run desktop
-npm run build:win
+npm.cmd ci
+npm.cmd test
+npm.cmd run build:win
 ```
 
 File đóng gói ở `dist/`. GitHub Actions: vào **Actions → Build Windows desktop → Run workflow**, đợi hoàn tất rồi tải artifact **Reels-Desk-PC-Windows** chứa Setup và Portable. Workflow cũng chạy khi push tag `v*`. Không đóng gói `.env`, database, video hoặc khóa bí mật vào executable.
@@ -34,6 +35,19 @@ File đóng gói ở `dist/`. GitHub Actions: vào **Actions → Build Windows d
 Trong môi trường cloud dùng proxy, có thể cần `NODE_USE_ENV_PROXY=1` và `ELECTRON_GET_USE_PROXY=1` để tải Electron bằng proxy được cung cấp; giữ TLS verification. Build Setup từ Linux cần Wine; build trên Windows bằng workflow để tránh yêu cầu đó. Test runtime Electron trên Linux không thay thế kiểm thử UI/native dialog trên Windows.
 
 Vẫn hỗ trợ bản giao diện local bằng `npm start` hoặc `start-pc.cmd` cho phát triển. `npm start` không cần dependency ngoài Node, còn desktop/build cần `npm ci`.
+
+## Push mã nguồn lên GitHub
+
+Remote `origin` của dự án là `https://github.com/xumakha/tool-aff-fb`, nhánh `main`. Sau khi kiểm tra thay đổi, chạy trong terminal tại thư mục dự án:
+
+```powershell
+git status
+git add README.md build-pc.cmd
+git commit -m "Add one-click Windows build script"
+git push origin main
+```
+
+Nếu Git yêu cầu đăng nhập, dùng tài khoản GitHub có quyền ghi repository. `.env`, `data/`, `node_modules/` và `dist/` được bỏ qua; không dùng `git add -f` cho các mục này. File `.exe` lấy từ `dist/` hoặc artifact GitHub Actions, không đưa vào commit mã nguồn.
 
 ## Chọn video và lên lịch
 
