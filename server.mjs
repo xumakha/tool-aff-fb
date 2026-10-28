@@ -94,6 +94,14 @@ const server=http.createServer(async(req,res)=>{try{
   const input=JSON.parse(await body(req));const {shopURL}=await import('./desktop/shopee-url.cjs');
   const shop=shopURL(input.url);shopeeState={running:true,message:'Đang mở Shopee',downloaded:0};process.send({type:'shopee-start',url:shop});return json(res,202,shopeeState);
  }
+ if(url.pathname==='/api/videos/duplicates/preview' && req.method==='POST'){
+  if(shopeeState.running)throw Error('Đợi tải Shopee hoàn tất trước khi quét file trùng');
+  const {previewDuplicates}=await import('./duplicate-videos.mjs');const input=JSON.parse(await body(req));return json(res,200,await previewDuplicates(input.path,db));
+ }
+ if(url.pathname==='/api/videos/duplicates/delete' && req.method==='POST'){
+  if(shopeeState.running)throw Error('Đợi tải Shopee hoàn tất trước khi xóa file trùng');
+  const {deleteDuplicates}=await import('./duplicate-videos.mjs');const input=JSON.parse(await body(req));return json(res,200,await deleteDuplicates(input.id,input.ids,db));
+ }
  if(url.pathname==='/api/folders/pick' && req.method==='POST')return json(res,200,{path:await pickFolder()});
  if(url.pathname==='/api/videos/pick' && req.method==='POST')return json(res,200,{paths:await pickFolder(true)});
  if(['/api/folders/import','/api/videos/import'].includes(url.pathname) && req.method==='POST'){

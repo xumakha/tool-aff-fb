@@ -32,7 +32,8 @@
       ".env.example",
       "package.json",
       "affiliate.mjs",
-      "scheduled-media.mjs"
+      "scheduled-media.mjs",
+      "duplicate-videos.mjs"
     ],
     "asar": true,
     "win": {

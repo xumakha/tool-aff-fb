@@ -1,0 +1,22 @@
+import {readdir,realpath,lstat} from 'node:fs/promises';
+import {createReadStream,realpathSync,lstatSync,unlinkSync} from 'node:fs';
+import {createHash,randomUUID} from 'node:crypto';
+import {join,parse,isAbsolute} from 'node:path';
+const previews=new Map();
+function snapshot(info){return {size:info.size,mtime:info.mtimeMs,ino:info.ino,dev:info.dev};}
+function same(a,b){return a.size===b.size&&a.mtime===b.mtime&&a.ino===b.ino&&a.dev===b.dev;}
+async function fingerprint(file){const before=await lstat(file);if(!before.isFile()||before.isSymbolicLink())throw Error('Không phải file thường');const hash=createHash('sha256');for await(const chunk of createReadStream(file))hash.update(chunk);const after=await lstat(file);if(!same(snapshot(before),snapshot(after)))throw Error('File vừa thay đổi');return {hash:hash.digest('hex'),...snapshot(after)};}
+function protectedFile(db,file){return !!db.prepare('SELECT jobs.id FROM jobs JOIN media ON media.id=jobs.media_id WHERE media.path=? LIMIT 1').get(file);}
+export async function previewDuplicates(folder,db){if(typeof folder!=='string'||!isAbsolute(folder))throw Error('Chọn đường dẫn thư mục tuyệt đối');folder=await realpath(folder);if(!(await lstat(folder)).isDirectory())throw Error('Không phải thư mục');const groups=new Map(),queue=[folder],skipped=[];let count=0,folders=0;
+ while(queue.length){const current=queue.pop();if(++folders>10000)throw Error('Thư mục quá lớn (tối đa 10000 thư mục)');for(const entry of await readdir(current,{withFileTypes:true})){const file=join(current,entry.name);if(entry.isSymbolicLink())continue;if(entry.isDirectory()){queue.push(file);continue;}if(!entry.isFile()||! /\.(mp4|mov)$/i.test(entry.name))continue;if(++count>10000)throw Error('Mỗi lượt quét tối đa 10000 video');const parsed=parse(entry.name),suffix=parsed.name.match(/^(.*?)\s*\((\d+)\)$/);const key=(suffix?suffix[1].trim():parsed.name).normalize('NFC').toLowerCase()+parsed.ext.toLowerCase();if(!groups.has(key))groups.set(key,[]);groups.get(key).push({path:file,name:entry.name,numbered:!!suffix,number:suffix?Number(suffix[2]):0});}}
+ const candidates=[];for(const group of groups.values()){if(group.length<2||!group.some(f=>f.numbered))continue;const hashes=new Map();for(const file of group){try{const info=await fingerprint(file.path);const key=info.size+':'+info.hash;if(!hashes.has(key))hashes.set(key,[]);hashes.get(key).push({...file,...info});}catch(error){skipped.push({path:file.path,reason:error.message});}}
+ for(const matches of hashes.values()){matches.sort((a,b)=>Number(a.numbered)-Number(b.numbered)||a.number-b.number||a.path.localeCompare(b.path));const keep=matches[0];for(const file of matches.slice(1)){if(!file.numbered)continue;if(protectedFile(db,file.path)){skipped.push({path:file.path,reason:'Video có lịch đăng hoặc lịch sử đăng, giữ nguyên'});continue;}candidates.push({...file,id:randomUUID(),keep});}}}
+ const id=randomUUID();previews.set(id,{candidates,expires:Date.now()+10*60000});setTimeout(()=>previews.delete(id),10*60000).unref();return {id,folder,scanned:count,candidates:candidates.map(f=>({id:f.id,path:f.path,keep:f.keep.path,size:f.size})),skipped};
+}
+export async function deleteDuplicates(id,ids,db){const preview=previews.get(id);if(!preview||preview.expires<Date.now())throw Error('Danh sách hết hạn. Quét lại thư mục.');if(!Array.isArray(ids)||!ids.length||new Set(ids).size!==ids.length||ids.some(id=>!preview.candidates.some(f=>f.id===id)))throw Error('Chọn các file trong danh sách đã quét');previews.delete(id);const deleted=[],skipped=[];
+ for(const file of preview.candidates.filter(f=>ids.includes(f.id))){try{const keep=await fingerprint(file.keep.path),duplicate=await fingerprint(file.path);if(!same(keep,file.keep)||!same(duplicate,file)||keep.hash!==duplicate.hash)throw Error('File đã thay đổi sau khi quét');
+ // Synchronous final checks and deletion prevent a new local schedule slipping between them.
+ if(realpathSync(file.path)!==file.path||realpathSync(file.keep.path)!==file.keep.path||!same(snapshot(lstatSync(file.path)),file)||!same(snapshot(lstatSync(file.keep.path)),file.keep))throw Error('Đường dẫn hoặc file đã thay đổi');if(protectedFile(db,file.path))throw Error('Video đã có lịch đăng hoặc lịch sử đăng');unlinkSync(file.path);db.prepare('DELETE FROM media WHERE path=? AND NOT EXISTS(SELECT 1 FROM jobs WHERE jobs.media_id=media.id)').run(file.path);deleted.push(file.path);
+ }catch(error){skipped.push({path:file.path,reason:error.message});}}
+ return {deleted,skipped};
+}
