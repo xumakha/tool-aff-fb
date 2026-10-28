@@ -34,6 +34,14 @@ export async function checkUnchanged(media) {
   return current;
 }
 export async function pickFolder() {
+  if (process.env.DESKTOP_MODE === '1' && process.send) {
+    const id = crypto.randomUUID();
+    return new Promise((resolve,reject)=>{
+      const finish=message=>{if(message.type==='picked-folder' && message.id===id){clearTimeout(timer);process.off('message',finish);resolve(message.path || '');}};
+      const timer=setTimeout(()=>{process.off('message',finish);reject(new Error('Hết thời gian chọn thư mục'));},180000);
+      process.on('message',finish);process.send({type:'pick-folder',id});
+    });
+  }
   if (process.platform === 'win32') {
     const script = "Add-Type -AssemblyName System.Windows.Forms; $dialog = New-Object System.Windows.Forms.FolderBrowserDialog; $dialog.Description = 'Chon thu muc video'; if ($dialog.ShowDialog() -eq 'OK') { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; [Console]::Write($dialog.SelectedPath) }";
     const {stdout} = await exec('powershell.exe', ['-NoProfile', '-STA', '-Command', script], {timeout:120000, maxBuffer:65536, windowsHide:true});

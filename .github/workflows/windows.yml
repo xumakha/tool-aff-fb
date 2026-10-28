@@ -1,0 +1,25 @@
+name: Build Windows desktop
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: node test/pc-smoke.mjs
+      - run: npm run build:win -- --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Reels-Desk-PC-Windows
+          path: dist/*.exe
+          if-no-files-found: error

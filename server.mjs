@@ -1,4 +1,5 @@
 import http from 'node:http';
+import {fileURLToPath} from 'node:url';
 import {DatabaseSync} from 'node:sqlite';
 import {mkdirSync,readFileSync,createReadStream} from 'node:fs';
 import {randomBytes,createCipheriv,createDecipheriv,timingSafeEqual} from 'node:crypto';
@@ -30,7 +31,8 @@ const server=http.createServer(async(req,res)=>{try{
  const allowedHosts=new Set(['localhost','127.0.0.1','[::1]',new URL(base).hostname]);
  if(!allowedHosts.has(new URL(`http://${req.headers.host}`).hostname))return json(res,403,{error:'Host không hợp lệ'});
  if(req.method!=='GET' && req.headers['sec-fetch-site']==='cross-site')return json(res,403,{error:'Yêu cầu từ website khác bị chặn'});
- if(req.method!=='GET' && req.headers.origin && req.headers.origin!==new URL(base).origin)return json(res,403,{error:'Origin không hợp lệ'});
+ const allowedOrigins=new Set([new URL(base).origin]);if(process.env.DESKTOP_MODE==='1'){allowedOrigins.add(`http://localhost:${process.env.PORT}`);allowedOrigins.add(`http://127.0.0.1:${process.env.PORT}`);}
+ if(req.method!=='GET' && req.headers.origin && !allowedOrigins.has(req.headers.origin))return json(res,403,{error:'Origin không hợp lệ'});
  if(req.method==='GET' && url.pathname==='/api/state')return json(res,200,{configured:config(),pages:db.prepare('SELECT id,name FROM pages').all(),media:db.prepare('SELECT * FROM media').all(),jobs:db.prepare('SELECT jobs.*,pages.name AS page_name,media.name AS media_name FROM jobs LEFT JOIN pages ON pages.id=jobs.page_id LEFT JOIN media ON media.id=jobs.media_id ORDER BY due DESC').all()});
  if(url.pathname==='/auth/meta' && req.method==='GET'){
   if(!config())return json(res,400,{error:'Cần cấu hình Meta App, phiên bản API và khóa mã hóa trong .env'});
@@ -71,7 +73,7 @@ const server=http.createServer(async(req,res)=>{try{
  if(url.pathname.startsWith('/api/jobs/') && req.method==='DELETE'){
   const result=db.prepare("UPDATE jobs SET status='cancelled' WHERE id=? AND status='queued'").run(url.pathname.split('/').pop());return json(res,result.changes?200:409,{ok:!!result.changes});
  }
- if(req.method==='GET' && ['/', '/app.js','/style.css'].includes(url.pathname)){const file=url.pathname==='/'?'index.html':url.pathname.slice(1);res.writeHead(200,{'Content-Type':file.endsWith('.html')?'text/html; charset=utf-8':file.endsWith('.js')?'text/javascript':'text/css','Content-Security-Policy':"default-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",'X-Content-Type-Options':'nosniff'});return res.end(readFileSync(`public/${file}`));}
+ if(req.method==='GET' && ['/', '/app.js','/style.css'].includes(url.pathname)){const file=url.pathname==='/'?'index.html':url.pathname.slice(1);res.writeHead(200,{'Content-Type':file.endsWith('.html')?'text/html; charset=utf-8':file.endsWith('.js')?'text/javascript':'text/css','Content-Security-Policy':"default-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",'X-Content-Type-Options':'nosniff'});return res.end(readFileSync(fileURLToPath(new URL(`./public/${file}`,import.meta.url))));}
  json(res,404,{error:'Không tìm thấy'});
  }catch(error){json(res,400,{error:error.message});}});
 let busy=false;
@@ -85,4 +87,4 @@ async function tick(){if(busy || !config())return;busy=true;try{
  }catch(error){db.prepare("UPDATE jobs SET status='review',error=? WHERE id=?").run(`${error.message} Kiểm tra Facebook trước khi tạo lại lịch.`,job.id);}
  }finally{busy=false;}}
 setInterval(()=>tick().catch(()=>console.error('Worker gặp lỗi nội bộ')),15000).unref();
-server.listen(Number(process.env.PORT || 3000),process.env.HOST || '127.0.0.1',()=>console.log(`Reels Desk listening on port ${server.address().port}`));
+server.listen(Number(process.env.PORT || 3000),process.env.HOST || '127.0.0.1',()=>{console.log(`Reels Desk listening on port ${server.address().port}`);if(process.send)process.send({type:'ready',port:server.address().port});});

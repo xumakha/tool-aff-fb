@@ -1,1 +1,58 @@
-{"name":"reels-desk","version":"0.2.0","private":true,"type":"module","engines":{"node":">=24"},"scripts":{"start":"node --env-file-if-exists=.env server.mjs","test":"node --test test/*.test.mjs"}}
+{
+  "name": "reels-desk",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.mjs",
+    "test": "node --test test/*.test.mjs",
+    "desktop": "electron .",
+    "build:win": "electron-builder --win nsis portable --x64",
+    "build:dir": "electron-builder --dir"
+  },
+  "main": "desktop/main.cjs",
+  "description": "Facebook Reels scheduler for Windows PC",
+  "author": "Reels Desk",
+  "license": "UNLICENSED",
+  "build": {
+    "appId": "com.reelsdesk.pc",
+    "productName": "Reels Desk PC",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "desktop/**",
+      "server.mjs",
+      "meta.mjs",
+      "local-media.mjs",
+      "public/**",
+      ".env.example",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "Reels-Desk-PC-${version}-${arch}-Setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "Reels-Desk-PC-${version}-${arch}-Portable.${ext}"
+    }
+  },
+  "devDependencies": {
+    "electron": "45.1.0",
+    "electron-builder": "26.18.0"
+  }
+}

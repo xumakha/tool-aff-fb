@@ -1,20 +1,39 @@
 # Reels Desk PC
 
-Tool chạy trên PC, đọc video trực tiếp từ các thư mục trên máy và đăng Facebook Page Reels qua API Meta. Không cần S3, không sao chép video vào kho lưu trữ của tool. Giao diện mở trong trình duyệt; đây chưa phải ứng dụng đóng gói `.exe`.
+Tool chạy trên PC, đọc video trực tiếp từ các thư mục trên máy và đăng Facebook Page Reels qua API Meta. Không cần S3, không sao chép video vào kho lưu trữ của tool. Giao diện desktop đóng gói bằng Electron, kèm worker và SQLite.
 
-## Chạy trên Windows
+## Ứng dụng Windows (.exe)
 
-Cài Node.js **24 trở lên**, tải hoặc clone repo, rồi mở `start-pc.cmd`. Script tự tạo `.env` từ `.env.example` nếu chưa có và chạy tool. Mở `http://localhost:3000` (hoặc APP_URL/cổng bạn cấu hình). Giữ cửa sổ tool mở.
+Bản desktop Electron có cửa sổ riêng, không cần mở trình duyệt hoặc cài Node trên máy người dùng.
 
-Hoặc chạy terminal:
+- **Portable:** mở `Reels-Desk-PC-0.3.0-x64-Portable.exe`.
+- **Setup:** bộ cài `Reels-Desk-PC-0.3.0-x64-Setup.exe` được tạo bởi workflow Windows trong GitHub Actions; cài đặt rồi mở shortcut **Reels Desk PC**.
+- Yêu cầu Windows 10/11 64-bit. Bản hiện tại chưa có chứng thư ký mã, Windows có thể hiện cảnh báo nhà phát hành.
+
+Menu **Reels Desk → Cấu hình Meta (.env)** mở Notepad để nhập cấu hình. Lưu rồi thoát/mở lại app. Khóa mã hóa được sinh tự động khi thiếu. Menu **Mở thư mục dữ liệu** mở nơi lưu cấu hình/database; thông thường `%APPDATA%\Reels Desk PC`. Không chỉnh `.env` trong thư mục cài đặt.
+
+Nếu chuyển từ bản chạy bằng `npm start`: dừng hoàn toàn bản cũ, vào **Mở thư mục dữ liệu** của desktop, thoát app, rồi chép `.env` và thư mục `data/` cũ vào đó. Giữ đúng khóa mã hóa đi cùng database. Video gốc giữ nguyên vị trí. Mỗi máy chỉ chạy một phiên tool. Cổng mặc định 3000 phải còn trống; nếu đổi PORT thì sửa APP_URL/callback tương ứng.
+
+Đăng nhập Facebook mở trong trình duyệt mặc định của Windows. Hoàn tất quyền rồi quay lại app; danh sách Page tự cập nhật. Nếu đặt ADMIN_PASSWORD, trình duyệt ngoài có thể yêu cầu username bất kỳ và mật khẩu đó. Desktop dùng API chính thức nên yêu cầu Meta App/OAuth vẫn áp dụng. Khi dùng APP_URL HTTPS qua reverse proxy, bảo vệ truy cập bằng mật khẩu.
+
+App giữ worker chạy trong lúc cửa sổ mở và hạn chế tự sleep; không thể bảo đảm đăng khi bạn chủ động sleep/tắt máy, mất mạng hoặc thoát app. Đóng cửa sổ app là thoát worker, không chạy ngầm qua system tray.
+
+### Build từ mã nguồn
+
+Cần Node.js 24+. Trên Windows:
 
 ```sh
-git clone https://github.com/xumakha/tool-aff-fb.git
-cd tool-aff-fb
-npm start
+npm ci
+npm test
+npm run desktop
+npm run build:win
 ```
 
-Không cần `npm install`. Nếu đã cài bản cũ, cập nhật mã nguồn nhưng **giữ nguyên `.env` và `data/`**, sau đó khởi động lại. Migration database tự thêm cột, giữ video cũ và lịch cũ. SQLite của Node đang experimental.
+File đóng gói ở `dist/`. GitHub Actions: vào **Actions → Build Windows desktop → Run workflow**, đợi hoàn tất rồi tải artifact **Reels-Desk-PC-Windows** chứa Setup và Portable. Workflow cũng chạy khi push tag `v*`. Không đóng gói `.env`, database, video hoặc khóa bí mật vào executable.
+
+Trong môi trường cloud dùng proxy, có thể cần `NODE_USE_ENV_PROXY=1` và `ELECTRON_GET_USE_PROXY=1` để tải Electron bằng proxy được cung cấp; giữ TLS verification. Build Setup từ Linux cần Wine; build trên Windows bằng workflow để tránh yêu cầu đó. Test runtime Electron trên Linux không thay thế kiểm thử UI/native dialog trên Windows.
+
+Vẫn hỗ trợ bản giao diện local bằng `npm start` hoặc `start-pc.cmd` cho phát triển. `npm start` không cần dependency ngoài Node, còn desktop/build cần `npm ci`.
 
 ## Chọn video và lên lịch
 
@@ -53,9 +72,9 @@ API Reels sử dụng start → upload nhị phân → finish/PUBLISHED, sau đ�
 
 `queued` → `running` → `processing` → `published`. Lỗi hoặc gián đoạn lúc upload/đăng chuyển sang `review`, không tự lặp lại vì Meta có thể đã nhận bài. Kiểm tra Page và video ID trước khi tạo lịch mới. Chỉ hủy được bài đang chờ. Chạy **một tiến trình tool duy nhất**.
 
-- Hộp thoại chọn thư mục dùng Windows PowerShell + Windows Forms; chưa chạy kiểm thử trên Windows trong môi trường Linux này. macOS/Linux dùng ô đường dẫn.
+- Hộp thoại chọn thư mục trong desktop dùng Electron dialog; bản npm start dùng Windows PowerShell + Windows Forms; chưa chạy kiểm thử trên Windows trong môi trường Linux này. macOS/Linux dùng ô đường dẫn.
 - Kiểm tra container MP4/MOV sơ bộ, chưa kiểm tra codec/thời lượng/tỷ lệ bằng ffprobe. Không còn giới hạn upload local 100 MB; giới hạn Meta vẫn áp dụng.
-- Chưa có file `.exe`, tự khởi động Windows, chống sleep, nhiều người dùng, AI/render, sửa lịch, hay tự đăng lại bài lỗi.
+- Chưa có tự khởi động Windows, system tray, nhiều người dùng, AI/render, sửa lịch, hay tự đăng lại bài lỗi.
 - Token AES-256-GCM không trả về frontend. Chưa có nút ngắt kết nối/xóa dữ liệu và quy trình xóa dữ liệu Meta hoàn chỉnh.
 
 ## Kiểm tra

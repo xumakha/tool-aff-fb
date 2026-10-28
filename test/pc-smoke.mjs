@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 const temp=await mkdtemp(join(tmpdir(),'reels-pc-smoke-')), folder=join(temp,'video space');
 const {mkdir}=await import('node:fs/promises');await mkdir(folder);const file=join(folder,'test.mp4');const bytes=Buffer.alloc(24);bytes.write('ftyp',4);await writeFile(file,bytes);
-const child=spawn(process.execPath,['server.mjs'],{env:{...process.env,DATA_DIR:join(temp,'data'),PORT:'0',HOST:'127.0.0.1',APP_URL:'http://localhost:3000',ADMIN_PASSWORD:'',META_APP_ID:'',META_APP_SECRET:''},stdio:['ignore','pipe','pipe']});
+const child=spawn(process.execPath,[process.env.SMOKE_SERVER_ENTRY || 'server.mjs'],{env:{...process.env,DATA_DIR:join(temp,'data'),PORT:'0',HOST:'127.0.0.1',APP_URL:'http://localhost:3000',ADMIN_PASSWORD:'',META_APP_ID:'',META_APP_SECRET:''},stdio:['ignore','pipe','pipe']});
 let db;try{
  let text='';await new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(Error('Startup timeout')),10000);child.once('exit',code=>{clearTimeout(timeout);reject(Error(`Server exited ${code}`));});child.stdout.on('data',chunk=>{text+=chunk;if(text.includes('listening')){clearTimeout(timeout);resolve();}});});
  const port=text.match(/port (\d+)/)[1];const base=`http://127.0.0.1:${port}`;
