@@ -72,6 +72,16 @@ Trong **Tạo lịch đăng → Phạm vi lên lịch**, chọn **Từng video**
 
 Nếu có file thay đổi/mất hoặc video đã có bài chờ, đang xử lý hay cần kiểm tra trên Page đó, cả lượt tạo lịch sẽ bị từ chối. Xử lý lịch cũ hoặc chuyển sang từng video để chọn nội dung khác.
 
+## Tải video từ shop Shopee (desktop, thử nghiệm)
+
+Trong **Chọn video → Tải video shop Shopee**, nhập link như `https://shopee.vn/ipone_vietnam`, bấm **Tải video của shop** và chọn thư mục lưu. App mở cửa sổ Shopee riêng; đăng nhập hoặc xử lý CAPTCHA tại đó nếu được yêu cầu. Phiên đăng nhập Shopee được lưu riêng trong dữ liệu Electron. Đóng cửa sổ Shopee để dừng lượt quét; các video đã tải vẫn được giữ.
+
+Sau khi chọn thư mục video, app mở hộp thoại **Lưu danh sách video Shopee** để chọn vị trí và tên file Excel `.xlsx`. Hủy hộp thoại sẽ hủy lượt tải. Excel có đúng hai cột: **Link sản phẩm** và **Tên sản phẩm**. Tên trong Excel là tên file video thực tế, **bao gồm `.mp4` và số thứ tự khi trùng tên**. Ví dụ `Áo đẹp (2).mp4`. Chỉ video tải thành công mới có dòng; file Excel được cập nhật sau từng video nên dừng quét vẫn giữ danh sách đã ghi. Nếu không tải được video nào, file chỉ có tiêu đề cột. Không mở Excel trong lúc tải để tránh Windows khóa file; nếu cập nhật Excel lỗi, lượt tải dừng và hiện thông báo, video đã tải được giữ nhưng dòng mới nhất có thể chưa được ghi.
+
+Tool cuộn trang, thử chuyển trang và gom link sản phẩm, nhận diện biểu tượng `.shopee_ic .stroke-none` (kèm biến thể cùng phần tử). Tool kiểm tra cả các sản phẩm không có biểu tượng để tránh phụ thuộc hoàn toàn vào class. Mỗi sản phẩm được mở để đọc nguồn MP4 từ video hoặc tài nguyên đã tải. Video lưu bằng tiêu đề sản phẩm, giữ tiếng Việt, thay ký tự không hợp lệ trên Windows; tên trùng được thêm số. File tải hoàn chỉnh được tự thêm vào thư viện. File tạm được xóa khi tải lỗi; không ghi đè video có sẵn. Chạy lại lượt tải có thể tạo thêm bản có số thứ tự.
+
+Đây là tính năng thử nghiệm, **chưa xác minh với shop thật**. Shopee có thể đổi DOM, yêu cầu đăng nhập, chặn trình duyệt hoặc chỉ tải video sau tương tác; nguồn blob/HLS không có MP4 trực tiếp chưa được hỗ trợ. Không cam kết lấy đủ toàn bộ video. Giới hạn mỗi lượt: 100 trang, 60 lần cuộn/trang và 1 GB/video; video không tìm được nguồn sẽ được bỏ qua, lỗi tải được hiển thị trong giao diện. Bản `npm start` không có cửa sổ Shopee; dùng `npm run desktop` sau khi cài dependencies hoặc build lại `.exe` để dùng chức năng này.
+
 ## Dữ liệu lưu ở đâu?
 
 **File video gốc luôn được giữ nguyên:** thêm video chỉ lưu đường dẫn; xem trước và đăng bài chỉ đọc file. Xóa một hoặc nhiều video ở **Lên lịch nhanh** cũng bỏ chúng khỏi **Thư viện video** và ngược lại, không xóa/di chuyển/sửa file trên máy. Lên lịch, hủy lịch và bỏ video đã đăng cũng chỉ thay đổi dữ liệu trong tool. Bạn có thể chọn lại file để thêm vào thư viện. Nếu tự xóa hoặc di chuyển file bằng công cụ bên ngoài, tool có thể không đọc được video khi đến giờ đăng.

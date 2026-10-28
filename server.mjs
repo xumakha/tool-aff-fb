@@ -34,6 +34,11 @@ function crypt(value, decrypt=false) {
  if (decrypt) {const [iv,tag,data]=value.split('.').map(x=>Buffer.from(x,'hex')); const c=createDecipheriv('aes-256-gcm',key,iv);c.setAuthTag(tag);return Buffer.concat([c.update(data),c.final()]).toString();}
  const iv=randomBytes(12),c=createCipheriv('aes-256-gcm',key,iv); const data=Buffer.concat([c.update(value),c.final()]); return [iv,c.getAuthTag(),data].map(x=>x.toString('hex')).join('.');
 }
+let shopeeState={running:false,message:'Chỉ hỗ trợ bản desktop Electron',downloaded:0};
+process.on('message',async message=>{
+ if(message.type==='shopee-state')shopeeState=message.state;
+ if(message.type==='shopee-file')try{const {files}=await selectVideos([message.path]);for(const file of files)db.prepare('INSERT INTO media(id,name,size,path,mtime,folder) VALUES(?,?,?,?,?,?)').run(randomBytes(16).toString('hex'),file.name,file.size,file.path,file.mtime,null);}catch(error){shopeeState.message='Đã tải nhưng không thêm được thư viện: '+error.message;}
+});
 const states = new Map();
 function json(res,status,data){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(data));}
 async function body(req,limit=1024*1024){let size=0;const chunks=[];for await(const chunk of req){size+=chunk.length;if(size>limit)throw new Error('Dữ liệu vượt giới hạn');chunks.push(chunk);}return Buffer.concat(chunks);}
@@ -61,6 +66,13 @@ const server=http.createServer(async(req,res)=>{try{
   const token=await exchange.json();if(!exchange.ok || !token.access_token)throw new Error('Không đổi được mã đăng nhập Meta');
   const pages=await meta.pages(token.access_token);for(const p of pages)if(p.access_token)db.prepare('INSERT OR REPLACE INTO pages VALUES(?,?,?)').run(p.id,p.name,crypt(p.access_token));
   res.writeHead(302,{Location:'/', 'Set-Cookie':'meta_state=; HttpOnly; SameSite=Lax; Path=/auth; Max-Age=0'});return res.end();
+ }
+ if(url.pathname==='/api/shopee' && req.method==='GET')return json(res,200,shopeeState);
+ if(url.pathname==='/api/shopee' && req.method==='POST'){
+  if(process.env.DESKTOP_MODE!=='1'||!process.send)throw Error('Mở bản desktop Electron để tải Shopee');
+  if(shopeeState.running)return json(res,409,{error:'Đang có lượt tải Shopee'});
+  const input=JSON.parse(await body(req));const {shopURL}=await import('./desktop/shopee-url.cjs');
+  const shop=shopURL(input.url);shopeeState={running:true,message:'Đang mở Shopee',downloaded:0};process.send({type:'shopee-start',url:shop});return json(res,202,shopeeState);
  }
  if(url.pathname==='/api/folders/pick' && req.method==='POST')return json(res,200,{path:await pickFolder()});
  if(url.pathname==='/api/videos/pick' && req.method==='POST')return json(res,200,{paths:await pickFolder(true)});
