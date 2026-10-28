@@ -1,0 +1,12 @@
+const {readFile,writeFile,rename,unlink,stat,open}=require('node:fs/promises');
+const path=require('node:path');
+const {randomUUID}=require('node:crypto');
+function productIdentity(value){try{const url=new URL(value);if(url.protocol!=='https:'||!['shopee.vn','www.shopee.vn'].includes(url.hostname)||url.username||url.password||url.port)return null;const match=url.pathname.match(/(?:-i\.(\d+)\.(\d+)|\/product\/(\d+)\/(\d+))\/?$/);if(!match)return null;const shop=(match[1]||match[3]).replace(/^0+(?=\d)/,''),item=(match[2]||match[4]).replace(/^0+(?=\d)/,'');return {id:shop+':'+item,url:`https://shopee.vn/product/${shop}/${item}`};}catch{return null;}}
+function collectProducts(products,items){for(const item of items){const identity=productIdentity(item.url);if(!identity)continue;const previous=products.get(identity.id);products.set(identity.id,{...identity,marked:!!(previous?.marked||item.marked)});}}
+async function loadHistory(folder){const file=path.join(folder,'.shopee-downloads.json');try{const parsed=JSON.parse(await readFile(file,'utf8'));if(parsed.version!==1||!parsed.items||typeof parsed.items!=='object'||Array.isArray(parsed.items))throw Error('Định dạng lịch sử không hợp lệ');return parsed;}catch(error){if(error.code==='ENOENT')return {version:1,items:{}};throw Error('Không đọc được lịch sử tải Shopee: '+error.message);}}
+async function saveHistory(folder,history){const temporary=path.join(folder,`.shopee-history-${randomUUID()}.tmp`);try{await writeFile(temporary,JSON.stringify(history,null,2),{flag:'wx'});await rename(temporary,path.join(folder,'.shopee-downloads.json'));}finally{await unlink(temporary).catch(()=>{});}}
+async function existingDownload(folder,record){if(!record||typeof record.name!=='string'||path.basename(record.name)!==record.name||/[\\/]/.test(record.name)||!record.name.toLowerCase().endsWith('.mp4')||!Number.isFinite(record.size)||!Number.isFinite(record.mtime))return null;
+ for(const base of [folder,path.join(folder,'video đã đăng')]){const file=path.join(base,record.name);try{const info=await stat(file);if(!info.isFile()||info.size!==record.size||Math.abs(info.mtimeMs-record.mtime)>2)continue;const handle=await open(file,'r');try{const header=Buffer.alloc(12);const {bytesRead}=await handle.read(header,0,12,0);if(bytesRead===12&&header.toString('ascii',4,8)==='ftyp')return file;}finally{await handle.close();}}catch(error){if(error.code!=='ENOENT')throw error;}}
+ return null;
+}
+module.exports={productIdentity,collectProducts,loadHistory,saveHistory,existingDownload};
