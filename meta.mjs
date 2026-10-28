@@ -21,9 +21,17 @@ export class Meta {
   async upload(url, token, bytes, size = bytes.length) {
     const target = new URL(url);
     if (target.protocol !== 'https:' || !(target.hostname === 'rupload.facebook.com' || target.hostname.endsWith('.rupload.facebook.com'))) throw new Error('Địa chỉ upload Meta không hợp lệ');
-    const response = await this.fetch(target, {method:'POST', headers:{Authorization:`OAuth ${token}`, offset:'0', file_size:String(size),'Content-Type':'application/octet-stream'},body:bytes,...(typeof bytes.pipe === 'function' ? {duplex:'half'} : {}),signal:AbortSignal.timeout(600000)});
-    const result = await response.json();
-    if (!response.ok || !result.success) throw new Error('Meta không chấp nhận video upload');
+    if(!Number.isSafeInteger(size) || size<=0)throw Error('Dung lượng video upload không hợp lệ');
+    const response = await this.fetch(target, {method:'POST', headers:{Authorization:`OAuth ${token}`, offset:'0', file_size:String(size),'Content-Length':String(size),'Content-Type':'application/octet-stream'},body:bytes,...(typeof bytes.pipe === 'function' ? {duplex:'half'} : {}),signal:AbortSignal.timeout(600000)});
+    let result;
+    try{result=await response.json();}catch{throw Error(`Upload Meta thất bại (HTTP ${Number(response.status) || 0}; phản hồi không phải JSON). Kiểm tra mạng/proxy và trạng thái video trên Facebook.`);}
+    if (!response.ok || !result?.success){
+      // Only retain numeric diagnostics: remote messages can contain tokens or URLs.
+      const code=Number.isSafeInteger(result?.error?.code)?result.error.code:null;
+      const subcode=Number.isSafeInteger(result?.error?.error_subcode)?result.error.error_subcode:null;
+      const hint=code===190?'Kết nối lại Facebook vì token không hợp lệ/hết hạn.':code===10 || code===200?'Kiểm tra quyền đăng của Page và ứng dụng.':'Kiểm tra trạng thái video, định dạng file và kết nối mạng; chưa thể xác định nguyên nhân chỉ từ mã lỗi.';
+      throw Error(`Meta không chấp nhận video upload (HTTP ${Number(response.status) || 0}${code!==null?`; code ${code}`:''}${subcode!==null?`; subcode ${subcode}`:''}). ${hint}`);
+    }
   }
   async finish(page, token, video, caption) { return this.request(`${page}/video_reels`, token, {upload_phase:'finish',video_id:video,video_state:'PUBLISHED',description:caption}); }
   async status(video, token) { return this.request(`${video}?fields=status,permalink_url`, token); }

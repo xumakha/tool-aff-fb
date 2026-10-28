@@ -1,7 +1,7 @@
 // Run explicitly: node test/pc-smoke.mjs (requires local listening permission).
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
-import {mkdtemp,writeFile,readdir,rm,realpath} from 'node:fs/promises';
+import {mkdtemp,writeFile,readFile,readdir,rm,realpath} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import assert from 'node:assert/strict';
@@ -22,6 +22,10 @@ let db;try{
  assert.equal(state.media[0].path,await realpath(file));assert.equal(state.media.length,1);
  db=new DatabaseSync(join(temp,'data','reels.sqlite'));db.prepare('INSERT INTO pages VALUES(?,?,?)').run('test-page','Test','no-real-token');
  const job={pageId:'test-page',mediaId:state.media[0].id,caption:'test',due:'2099-01-01T00:00:00Z'};assert.equal((await post('/api/jobs',job)).status,201);
+ assert.equal((await (await fetch(base+'/api/state')).json()).media.length,0);
+ assert.equal(db.prepare('SELECT path FROM media WHERE id=?').get(job.mediaId).path,await realpath(file));
+ // Explicitly import again to exercise manual deletion guards on an active job.
+ await post('/api/videos/import',{paths:[file]});
  const mediaUrl=base+'/api/media/'+state.media[0].id;
  const preview=await fetch(mediaUrl+'/preview',{headers:{Range:'bytes=4-7'}});assert.equal(preview.status,206);assert.equal(await preview.text(),'ftyp');
  assert.equal((await fetch(mediaUrl+'/preview',{headers:{Range:'bytes=999-'}})).status,416);
@@ -32,6 +36,7 @@ let db;try{
  assert.equal((await (await fetch(base+'/api/state')).json()).media.length,0);
  assert.equal((await fetch(mediaUrl+'/preview')).status,404);
  assert.equal(await realpath(file),state.media[0].path);
+ assert.deepEqual(await readFile(file),bytes,'Scheduling, cancellation and library deletion must preserve source bytes');
  assert.equal((await post('/api/jobs',job)).status,400);
  await post('/api/folders/import',{path:folder});
  assert.equal((await (await fetch(base+'/api/state')).json()).media[0].id,state.media[0].id);
@@ -47,11 +52,13 @@ let db;try{
  assert.equal((await post('/api/jobs/batch',{...batch,mediaIds:[...batch.mediaIds,state.media[0].id]})).status,400);
  assert.equal(countJobs(),before);
  assert.equal((await post('/api/jobs/batch',batch)).status,201);
+ assert.ok(!(await (await fetch(base+'/api/state')).json()).media.some(m=>batch.mediaIds.includes(m.id)));
  const batchJobs=db.prepare("SELECT * FROM jobs WHERE caption='Batch' ORDER BY due").all();
  assert.equal(batchJobs.length,2);assert.equal(Date.parse(batchJobs[1].due)-Date.parse(batchJobs[0].due),30*60000);
  assert.deepEqual(batchJobs.map(j=>j.media_id),batch.mediaIds);
  assert.equal((await post('/api/jobs/batch',batch)).status,400);assert.equal(countJobs(),before+2);
  db.prepare("UPDATE jobs SET status='cancelled' WHERE caption='Batch'").run();
+ await post('/api/folders/import',{path:folder});
  const custom={pageId:'test-page',items:[{mediaId:batch.mediaIds[0],caption:'Caption riêng 1',due:'2099-03-01T01:00:00Z'},{mediaId:batch.mediaIds[1],caption:'Caption riêng 2',now:true}]};
  const countBeforeCustom=countJobs();
  assert.equal((await post('/api/jobs/batch',{...custom,items:[custom.items[0],{...custom.items[1],now:false,due:'2000-01-01T00:00:00Z'}]})).status,400);
@@ -67,10 +74,29 @@ let db;try{
  assert.ok(library.some(m=>m.name==='chosen.mp4'));assert.ok(!library.some(m=>m.name==='not-chosen.mp4'));
  assert.equal((await post('/api/videos/import',{paths:[]})).status,400);
  db.prepare("UPDATE jobs SET status='processing' WHERE id=?").run(customJobs[0].id);
- library=(await (await fetch(base+'/api/state')).json()).media;assert.ok(library.some(m=>m.id===customJobs[0].media_id));
+ library=(await (await fetch(base+'/api/state')).json()).media;assert.ok(!library.some(m=>m.id===customJobs[0].media_id));
  db.prepare("UPDATE jobs SET status='published' WHERE id=?").run(customJobs[0].id);
  library=(await (await fetch(base+'/api/state')).json()).media;assert.ok(!library.some(m=>m.id===customJobs[0].media_id));
  const original=db.prepare('SELECT path FROM media WHERE id=?').get(customJobs[0].media_id);assert.ok(await realpath(original.path));
  assert.equal(db.prepare('SELECT status FROM jobs WHERE id=?').get(customJobs[0].id).status,'published');
- console.log('PASS: selected-file import, published-video hiding, source/history preservation, library, scheduling and batch validation.');
+ const retryMedia=db.prepare("SELECT id FROM media WHERE name='chosen.mp4'").get().id;
+ const retry={pageId:'test-page',items:[{mediaId:retryMedia,caption:'Retry',due:'2099-04-01T00:00:00Z'}]};
+ assert.equal((await post('/api/jobs/batch',retry)).status,201);
+ const retryJob=db.prepare("SELECT id FROM jobs WHERE caption='Retry'").get().id;
+ db.prepare("UPDATE jobs SET status='review' WHERE id=?").run(retryJob);
+ assert.equal((await post('/api/jobs/'+retryJob+'/clear-review',{confirmed:false})).status,400);
+ assert.equal((await post('/api/jobs/'+retryJob+'/clear-review',{confirmed:true})).status,200);
+ assert.ok((await (await fetch(base+'/api/state')).json()).media.some(m=>m.id===retryMedia));
+ assert.equal((await post('/api/jobs/batch',retry)).status,201);
+ for(const status of ['running','processing','review'])db.prepare('INSERT INTO jobs(id,status,media_id) VALUES(?,?,?)').run('preserve-'+status,status,retryMedia);
+ const preserved=db.prepare("SELECT id FROM jobs WHERE status NOT IN ('published','cancelled') ORDER BY id").all();
+ const removable=db.prepare("SELECT COUNT(*) AS n FROM jobs WHERE status IN ('published','cancelled')").get().n;
+ const mediaBefore=db.prepare('SELECT * FROM media ORDER BY id').all();
+ assert.equal((await fetch(base+'/api/jobs/history',{method:'DELETE',headers:{Origin:'https://evil.example'}})).status,403);
+ const cleared=await (await fetch(base+'/api/jobs/history',{method:'DELETE'})).json();assert.equal(cleared.count,removable);assert.ok(removable>0);
+ assert.deepEqual(db.prepare('SELECT id FROM jobs ORDER BY id').all(),preserved);
+ assert.deepEqual(db.prepare('SELECT * FROM media ORDER BY id').all(),mediaBefore);
+ assert.deepEqual(await readFile(join(folder,'chosen.mp4')),bytes);
+ assert.equal((await (await fetch(base+'/api/jobs/history',{method:'DELETE'})).json()).count,0);
+ console.log('PASS: history clearing preserves active jobs/media/files; library, retry and batch validation.');
 }finally{db?.close();const exit=once(child,'exit');child.kill();await exit;await rm(temp,{recursive:true,force:true});}

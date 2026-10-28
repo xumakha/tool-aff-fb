@@ -56,7 +56,7 @@ Nếu Git yêu cầu đăng nhập, dùng tài khoản GitHub có quyền ghi re
 3. Kết nối Facebook, chọn Page, video, caption và giờ Việt Nam; lưu lịch hoặc đăng ngay.
 4. Đến giờ, worker đọc file gốc theo luồng và tải trực tiếp sang Meta; không giữ toàn bộ video trong RAM.
 
-Sau khi chọn file, **Thư viện video** hiển thị danh sách kèm khung hình xem trước, tên, dung lượng và đường dẫn. Video có codec không được trình duyệt hỗ trợ hoặc file không còn đọc được sẽ hiện “Không có ảnh xem trước”. Khi Meta xác nhận **Đã xuất bản**, video tự được bỏ khỏi thư viện và bảng nhanh, giữ nguyên file gốc và lịch sử. Video đang chờ, đang xử lý hoặc lỗi vẫn còn để kiểm tra. Chọn lại file đã bỏ sẽ đưa nó trở lại thư viện.
+Sau khi chọn file, **Thư viện video** hiển thị danh sách kèm khung hình xem trước, tên, dung lượng và đường dẫn. Video có codec không được trình duyệt hỗ trợ hoặc file không còn đọc được sẽ hiện “Không có ảnh xem trước”. Ngay sau khi lưu lịch thành công (kể cả Đăng ngay), video tự được bỏ khỏi thư viện và bảng nhanh, giữ nguyên file gốc và dữ liệu để worker đăng bài. Theo dõi video chờ, đang xử lý hoặc lỗi trong Lịch xuất bản. Nếu tạo lịch thất bại, video vẫn ở thư viện. Chọn lại file đã bỏ sẽ đưa nó trở lại thư viện.
 
 Nút **Xóa khỏi thư viện** chỉ bỏ video khỏi danh sách, giữ nguyên file gốc và lịch sử đăng. Không cho xóa video có bài chờ, đang đăng/xử lý hoặc cần kiểm tra. Quét lại thư mục sẽ đưa video đã bỏ trở lại thư viện.
 
@@ -66,13 +66,15 @@ Không di chuyển, đổi tên, xóa hoặc chỉnh sửa video đã lên lịc
 
 ### Lên lịch từng video hoặc toàn bộ thư viện
 
-**Lên lịch nhanh** hiển thị mỗi video một dòng có ảnh thu nhỏ, checkbox, caption và giờ riêng. Chọn Page, chọn các dòng (hoặc chọn tất cả), đặt giờ bắt đầu/khoảng cách rồi bấm **Chia giờ cho dòng đã chọn**. Có thể áp dụng caption chung hoặc lấy tên video làm caption, sau đó sửa riêng từng dòng và bấm **Lưu các dòng đã chọn** một lần. Dòng chọn **Đăng ngay** sẽ vào hàng chờ xử lý ngay khi lưu. Các dòng đã lưu được bỏ chọn để tránh bấm nhầm lần nữa. Bản nháp được giữ khi tự làm mới dữ liệu, nhưng không lưu qua việc đóng/tải lại cửa sổ.
+**Lên lịch nhanh** hiển thị mỗi video một dòng có ảnh thu nhỏ, caption và giờ riêng. Chọn Page; chia giờ, áp dụng caption chung hoặc lấy tên video làm caption sẽ tác động lên **toàn bộ video trong thư viện**. Có thể sửa từng dòng trước khi bấm **Lên lịch/Đăng video** để lưu tất cả. Checkbox chỉ dùng để chọn video cần xóa khỏi tool, không ảnh hưởng đến việc lên lịch. Dòng chọn **Đăng ngay** sẽ vào hàng chờ xử lý ngay khi lưu. Bản nháp được giữ khi tự làm mới dữ liệu, nhưng không lưu qua việc đóng/tải lại cửa sổ. Khung **Facebook Pages** mặc định thu gọn; bấm tiêu đề để mở.
 
 Trong **Tạo lịch đăng → Phạm vi lên lịch**, chọn **Từng video** để đặt Page, caption và giờ riêng; hoặc **Tất cả video trong thư viện** để đặt chung Page/caption, giờ bắt đầu và khoảng cách giữa các bài (phút). Chế độ tất cả xếp theo tên video, hiển thị giờ đầu–cuối và tạo tối đa 1000 lịch một lần. Ví dụ bắt đầu 09:00, cách 60 phút sẽ đăng lần lượt 09:00, 10:00, 11:00.
 
 Nếu có file thay đổi/mất hoặc video đã có bài chờ, đang xử lý hay cần kiểm tra trên Page đó, cả lượt tạo lịch sẽ bị từ chối. Xử lý lịch cũ hoặc chuyển sang từng video để chọn nội dung khác.
 
 ## Dữ liệu lưu ở đâu?
+
+**File video gốc luôn được giữ nguyên:** thêm video chỉ lưu đường dẫn; xem trước và đăng bài chỉ đọc file. Xóa một hoặc nhiều video ở **Lên lịch nhanh** cũng bỏ chúng khỏi **Thư viện video** và ngược lại, không xóa/di chuyển/sửa file trên máy. Lên lịch, hủy lịch và bỏ video đã đăng cũng chỉ thay đổi dữ liệu trong tool. Bạn có thể chọn lại file để thêm vào thư viện. Nếu tự xóa hoặc di chuyển file bằng công cụ bên ngoài, tool có thể không đọc được video khi đến giờ đăng.
 
 `data/reels.sqlite` chỉ lưu đường dẫn, thông tin video, caption, lịch, trạng thái và token Page đã mã hóa. **File gốc giữ nguyên ở thư mục bạn chọn.** Video từ bản upload cũ vẫn ở `data/` và dùng được; tool không tự xóa chúng. Sao lưu SQLite và khóa mã hóa; sao lưu video gốc riêng. Không commit `.env` hoặc `data/`.
 
@@ -95,6 +97,8 @@ Khởi động lại tool sau khi thay `.env`. Không gửi App Secret/token và
 API Reels sử dụng start → upload nhị phân → finish/PUBLISHED, sau đó theo dõi xử lý. Lịch chạy trên PC, không gửi lịch trước lên Facebook. **Đăng Meta thật chưa được xác minh** do chưa có credentials và chưa truy cập được tài liệu Meta hiện hành trong môi trường phát triển. Kiểm chứng API/permission hiện hành và một video trên Page thử nghiệm trước khi vận hành.
 
 ## Trạng thái và giới hạn
+
+Nút **Clear lịch sử** trong **Lịch xuất bản** xóa các dòng đã xuất bản hoặc đã hủy sau khi xác nhận. Giữ nguyên bài đang chờ, đang upload/xử lý và cần kiểm tra; không xóa video gốc, dữ liệu thư viện hay bài trên Facebook. Bộ đếm đã xuất bản sẽ chỉ tính các dòng lịch sử còn lại.
 
 `queued` → `running` → `processing` → `published`. Lỗi hoặc gián đoạn lúc upload/đăng chuyển sang `review`, không tự lặp lại vì Meta có thể đã nhận bài. Kiểm tra Page và video ID trước khi tạo lịch mới. Chỉ hủy được bài đang chờ. Chạy **một tiến trình tool duy nhất**.
 

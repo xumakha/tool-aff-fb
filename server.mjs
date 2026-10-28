@@ -12,7 +12,14 @@ db.exec(`PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS pages(id TEXT PRIMA
 // Additive migration preserves existing uploads and scheduled jobs.
 const columns = db.prepare('PRAGMA table_info(media)').all().map(c=>c.name);
 for (const [name,type] of [['path','TEXT'],['mtime','REAL'],['folder','TEXT'],['hidden','INTEGER DEFAULT 0']]) if (!columns.includes(name)) db.exec(`ALTER TABLE media ADD COLUMN ${name} ${type}`);
+// Hide scheduled media atomically with job creation, preserving source and history.
+db.exec(`CREATE TRIGGER IF NOT EXISTS hide_scheduled_media AFTER INSERT ON jobs
+ BEGIN UPDATE media SET hidden=1 WHERE id=NEW.media_id; END;`);
 // Keep history and source files; remove confirmed publications from the library.
+db.exec(`CREATE TRIGGER IF NOT EXISTS restore_cancelled_media AFTER UPDATE OF status ON jobs
+ WHEN NEW.status='cancelled' AND OLD.status!='cancelled'
+ AND NOT EXISTS(SELECT 1 FROM jobs WHERE media_id=NEW.media_id AND status IN ('queued','running','processing','review'))
+ BEGIN UPDATE media SET hidden=0 WHERE id=NEW.media_id; END;`);
 db.exec(`CREATE TRIGGER IF NOT EXISTS hide_published_media AFTER UPDATE OF status ON jobs
  WHEN NEW.status='published' AND OLD.status!='published'
  BEGIN UPDATE media SET hidden=1 WHERE id=NEW.media_id; END;`);
@@ -119,7 +126,8 @@ const server=http.createServer(async(req,res)=>{try{
   try{
    for(const [index,id] of input.mediaIds.entries()){
     if(!db.prepare('SELECT id FROM media WHERE id=? AND COALESCE(hidden,0)=0').get(id))throw Error('Thư viện đã thay đổi. Hãy làm mới danh sách.');
-    if(db.prepare("SELECT id FROM jobs WHERE page_id=? AND media_id=? AND status IN ('queued','running','processing','review')").get(input.pageId,id))throw Error('Có video đã có lịch hoặc bài cần kiểm tra trên Page này. Chưa tạo lịch nào; hãy xử lý lịch cũ hoặc chọn từng video.');
+    const conflict=db.prepare("SELECT jobs.status,media.name FROM jobs JOIN media ON media.id=jobs.media_id WHERE page_id=? AND media_id=? AND status IN ('queued','running','processing','review') LIMIT 1").get(input.pageId,id);
+    if(conflict)throw Error(`Video "${conflict.name}" còn bài ${conflict.status==='review'?'Cần kiểm tra':'đang chờ hoặc đang xử lý'} trên Page này. Lịch đã hủy không chặn đăng lại. Chưa tạo lịch nào; xử lý bài này trong Lịch xuất bản.`);
     db.prepare('INSERT INTO jobs(id,page_id,media_id,caption,due,created) VALUES(?,?,?,?,?,?)').run(randomBytes(16).toString('hex'),input.pageId,id,items[index].caption,items[index].due,new Date().toISOString());
    }
    db.exec('COMMIT');
@@ -131,6 +139,16 @@ const server=http.createServer(async(req,res)=>{try{
   const selected=db.prepare('SELECT * FROM media WHERE id=?').get(input.mediaId);if(selected.path)await checkUnchanged(selected);
   const due=new Date(input.due || Date.now());if(!Number.isFinite(due.getTime()) || typeof input.caption!=='string' || input.caption.length>2200)throw new Error('Lịch đăng hoặc caption không hợp lệ');
   db.prepare('INSERT INTO jobs(id,page_id,media_id,caption,due,created) VALUES(?,?,?,?,?,?)').run(randomBytes(16).toString('hex'),input.pageId,input.mediaId,input.caption,due.toISOString(),new Date().toISOString());return json(res,201,{ok:true});
+ }
+ const clearReview=url.pathname.match(/^\/api\/jobs\/([a-f0-9]{32})\/clear-review$/);
+ if(clearReview && req.method==='POST'){
+  const input=JSON.parse(await body(req));if(input.confirmed!==true)throw Error('Cần xác nhận đã kiểm tra bài trên Facebook');
+  const result=db.prepare("UPDATE jobs SET status='cancelled' WHERE id=? AND status='review'").run(clearReview[1]);
+  return json(res,result.changes?200:409,{ok:!!result.changes,error:result.changes?undefined:'Trạng thái bài đã thay đổi; hãy làm mới danh sách'});
+ }
+ if(url.pathname==='/api/jobs/history' && req.method==='DELETE'){
+  const result=db.prepare("DELETE FROM jobs WHERE status IN ('published','cancelled')").run();
+  return json(res,200,{ok:true,count:result.changes});
  }
  if(url.pathname.startsWith('/api/jobs/') && req.method==='DELETE'){
   const result=db.prepare("UPDATE jobs SET status='cancelled' WHERE id=? AND status='queued'").run(url.pathname.split('/').pop());return json(res,result.changes?200:409,{ok:!!result.changes});
