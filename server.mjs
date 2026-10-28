@@ -1,3 +1,4 @@
+import {stageScheduledMedia,rollbackScheduledMedia,finishScheduledMedia} from './scheduled-media.mjs';
 import http from 'node:http';
 import {fileURLToPath} from 'node:url';
 import {DatabaseSync} from 'node:sqlite';
@@ -66,6 +67,13 @@ const server=http.createServer(async(req,res)=>{try{
   const token=await exchange.json();if(!exchange.ok || !token.access_token)throw new Error('Không đổi được mã đăng nhập Meta');
   const pages=await meta.pages(token.access_token);for(const p of pages)if(p.access_token)db.prepare('INSERT OR REPLACE INTO pages VALUES(?,?,?)').run(p.id,p.name,crypt(p.access_token));
   res.writeHead(302,{Location:'/', 'Set-Cookie':'meta_state=; HttpOnly; SameSite=Lax; Path=/auth; Max-Age=0'});return res.end();
+ }
+ if(url.pathname==='/api/affiliate/inspect' && req.method==='POST'){
+  const {inspectFile}=await import('./affiliate.mjs');return json(res,200,await inspectFile(JSON.parse(await body(req,29*1024*1024))));
+ }
+ if(url.pathname==='/api/affiliate/merge' && req.method==='POST'){
+  if(shopeeState.running)throw Error('Đợi lượt tải Shopee kết thúc trước khi ghép affiliate');
+  const {mergeAffiliate}=await import('./affiliate.mjs');return json(res,200,await mergeAffiliate(JSON.parse(await body(req))));
  }
  if(url.pathname==='/api/shopee' && req.method==='GET')return json(res,200,shopeeState);
  if(url.pathname==='/api/shopee' && req.method==='POST'){
@@ -142,6 +150,7 @@ const server=http.createServer(async(req,res)=>{try{
   }
   db.exec('BEGIN');
   const batchId=remote?randomBytes(16).toString('hex'):null;
+  let staged=[];
   try{
    for(const [index,id] of input.mediaIds.entries()){
     if(!db.prepare('SELECT id FROM media WHERE id=? AND COALESCE(hidden,0)=0').get(id))throw Error('Thư viện đã thay đổi. Hãy làm mới danh sách.');
@@ -150,16 +159,22 @@ const server=http.createServer(async(req,res)=>{try{
     if(remote)db.prepare('INSERT INTO jobs(id,page_id,media_id,caption,due,status,created,batch_id,progress,remote_now) VALUES(?,?,?,?,?,?,?,?,0,?)').run(randomBytes(16).toString('hex'),input.pageId,id,items[index].caption,items[index].due,'remote_queued',new Date().toISOString(),batchId,items[index].now?1:0);
     else db.prepare('INSERT INTO jobs(id,page_id,media_id,caption,due,created) VALUES(?,?,?,?,?,?)').run(randomBytes(16).toString('hex'),input.pageId,id,items[index].caption,items[index].due,new Date().toISOString());
    }
+   staged=stageScheduledMedia(db,input.mediaIds);
    db.exec('COMMIT');
-  }catch(error){db.exec('ROLLBACK');throw error;}
+  }catch(error){db.exec('ROLLBACK');rollbackScheduledMedia(staged);throw error;}
+  const archiveWarnings=finishScheduledMedia(staged);
   if(remote)setImmediate(()=>tick().catch(()=>console.error('Worker gặp lỗi nội bộ')));
-  return json(res,201,{ok:true,count:input.mediaIds.length,batchId});
+  return json(res,201,{ok:true,count:input.mediaIds.length,batchId,archiveWarnings});
  }
  if(url.pathname==='/api/jobs' && req.method==='POST'){
   const input=JSON.parse(await body(req));if(!db.prepare('SELECT id FROM pages WHERE id=?').get(input.pageId || '') || !db.prepare('SELECT id FROM media WHERE id=? AND COALESCE(hidden,0)=0').get(input.mediaId || ''))throw new Error('Chọn Page đã kết nối và video');
   const selected=db.prepare('SELECT * FROM media WHERE id=?').get(input.mediaId);if(selected.path)await checkUnchanged(selected);
   const due=new Date(input.due || Date.now());if(!Number.isFinite(due.getTime()) || typeof input.caption!=='string' || input.caption.length>2200)throw new Error('Lịch đăng hoặc caption không hợp lệ');
-  db.prepare('INSERT INTO jobs(id,page_id,media_id,caption,due,created) VALUES(?,?,?,?,?,?)').run(randomBytes(16).toString('hex'),input.pageId,input.mediaId,input.caption,due.toISOString(),new Date().toISOString());return json(res,201,{ok:true});
+  let staged=[];db.exec('BEGIN');try{
+   db.prepare('INSERT INTO jobs(id,page_id,media_id,caption,due,created) VALUES(?,?,?,?,?,?)').run(randomBytes(16).toString('hex'),input.pageId,input.mediaId,input.caption,due.toISOString(),new Date().toISOString());
+   staged=stageScheduledMedia(db,[input.mediaId]);db.exec('COMMIT');
+  }catch(error){db.exec('ROLLBACK');rollbackScheduledMedia(staged);throw error;}
+  return json(res,201,{ok:true,archiveWarnings:finishScheduledMedia(staged)});
  }
  const clearReview=url.pathname.match(/^\/api\/jobs\/([a-f0-9]{32})\/clear-review$/);
  if(clearReview && req.method==='POST'){

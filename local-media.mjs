@@ -1,3 +1,4 @@
+import {ensureArchive} from './scheduled-media.mjs';
 import {open, readdir, realpath, stat} from 'node:fs/promises';
 import {isAbsolute, join} from 'node:path';
 import {execFile} from 'node:child_process';
@@ -24,6 +25,7 @@ export async function scanFolder(path) {
     try { files.push(await inspectVideo(join(folder, entry.name))); }
     catch { skipped.push(entry.name); }
   }
+  for(const file of files)ensureArchive(file.path);
   return {folder, files, skipped};
 }
 export async function checkUnchanged(media) {
@@ -40,6 +42,7 @@ export async function selectVideos(paths) {
     if(typeof path!=='string' || !isAbsolute(path))throw Error('Đường dẫn video phải là tuyệt đối');
     files.push(await inspectVideo(path));
   }
+  for(const file of files)ensureArchive(file.path);
   return {files,skipped:[],folder:null};
 }
 export async function pickFolder(files=false) {

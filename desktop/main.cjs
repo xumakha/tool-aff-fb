@@ -27,6 +27,7 @@ app.whenReady().then(async()=>{
  window.webContents.on('will-attach-webview',event=>event.preventDefault());
  window.webContents.on('login',(event,details,authInfo,callback)=>{if(!authInfo.isProxy && ['localhost','127.0.0.1'].includes(authInfo.host) && Number(authInfo.port)===Number(port) && config.ADMIN_PASSWORD){event.preventDefault();callback('desktop',config.ADMIN_PASSWORD);}});
  worker.on('exit',()=>{if(!stopping){dialog.showErrorBox('Worker đã dừng','Lịch đăng sẽ không chạy. Hãy thoát rồi mở lại ứng dụng.');app.quit();}});
+ window.webContents.session.on('will-download',(_event,item,contents)=>{if(contents===window?.webContents && /\.xlsx$/i.test(item.getFilename()))item.setSaveDialogOptions({title:'Lưu Excel đã ghép affiliate',defaultPath:path.join(app.getPath('downloads'),item.getFilename()),filters:[{name:'Excel',extensions:['xlsx']}]});});
  await window.loadURL(origin);window.on('closed',()=>{window=null;app.quit();});
 }).catch(error=>{dialog.showErrorBox('Không mở được Reels Desk',error.message);app.quit();});
 app.on('before-quit',()=>{stopping=true;if(worker)worker.kill();if(blocker!==undefined && powerSaveBlocker.isStarted(blocker))powerSaveBlocker.stop(blocker);});

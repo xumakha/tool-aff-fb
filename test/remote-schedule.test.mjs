@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
-import {join,resolve} from 'node:path';
+import {join,resolve,basename} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {tmpdir} from 'node:os';
 import {DatabaseSync} from 'node:sqlite';
@@ -33,6 +33,7 @@ test('30 remote schedules reach 100 only after Meta confirms each SCHEDULED',asy
   assert.equal(jobs?.length,30);assert.ok(jobs.every(j=>j.status==='remote_scheduled' && j.progress===100),JSON.stringify(jobs.filter(j=>j.status!=='remote_scheduled').map(j=>({status:j.status,error:j.error}))));
   const meta=(await readFile(log,'utf8')).trim().split('\n').map(JSON.parse);assert.equal(meta.length,30);assert.ok(meta.every(m=>m.state==='SCHEDULED' && m.due===String(Date.parse(due)/1000)));
   assert.equal((await (await fetch(base+'/api/state')).json()).media.length,0);
-  for(const file of files)assert.deepEqual(await readFile(file),bytes);
+  for(const file of files){await assert.rejects(()=>readFile(file),{code:'ENOENT'});assert.deepEqual(await readFile(join(folder,'video đã đăng',basename(file))),bytes);}
+  for(const row of db.prepare('SELECT * FROM media').all()){assert.ok(row.path.includes('video đã đăng'));assert.deepEqual(await readFile(row.path),bytes);}
  }finally{db?.close();if(child.exitCode===null && !child.killed){const ended=once(child,'exit');child.kill();await ended;}await rm(temp,{recursive:true,force:true});}
 });

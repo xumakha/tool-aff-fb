@@ -30,7 +30,9 @@
       "local-media.mjs",
       "public/**",
       ".env.example",
-      "package.json"
+      "package.json",
+      "affiliate.mjs",
+      "scheduled-media.mjs"
     ],
     "asar": true,
     "win": {
@@ -54,5 +56,8 @@
   "devDependencies": {
     "electron": "45.1.0",
     "electron-builder": "26.18.0"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0"
   }
 }

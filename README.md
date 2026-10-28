@@ -34,7 +34,7 @@ File đóng gói ở `dist/`. GitHub Actions: vào **Actions → Build Windows d
 
 Trong môi trường cloud dùng proxy, có thể cần `NODE_USE_ENV_PROXY=1` và `ELECTRON_GET_USE_PROXY=1` để tải Electron bằng proxy được cung cấp; giữ TLS verification. Build Setup từ Linux cần Wine; build trên Windows bằng workflow để tránh yêu cầu đó. Test runtime Electron trên Linux không thay thế kiểm thử UI/native dialog trên Windows.
 
-Vẫn hỗ trợ bản giao diện local bằng `npm start` hoặc `start-pc.cmd` cho phát triển. `npm start` không cần dependency ngoài Node, còn desktop/build cần `npm ci`.
+Vẫn hỗ trợ bản giao diện local bằng `npm start` hoặc `start-pc.cmd` cho phát triển. Chạy `npm ci` trước khi dùng `npm start`, desktop hoặc build để cài các dependency (bao gồm thư viện đọc Excel).
 
 ## Push mã nguồn lên GitHub
 
@@ -56,7 +56,7 @@ Nếu Git yêu cầu đăng nhập, dùng tài khoản GitHub có quyền ghi re
 3. Kết nối Facebook, chọn Page, video, caption và giờ Việt Nam; lưu lịch hoặc đăng ngay.
 4. Trong Lên lịch nhanh, app đọc file gốc theo luồng và tải lên Meta ngay, không giữ toàn bộ video trong RAM. Sau khi Meta xác nhận lịch, có thể tắt máy.
 
-Sau khi chọn file, **Thư viện video** hiển thị danh sách kèm khung hình xem trước, tên, dung lượng và đường dẫn. Video có codec không được trình duyệt hỗ trợ hoặc file không còn đọc được sẽ hiện “Không có ảnh xem trước”. Ngay sau khi nhận yêu cầu lên lịch, video tự được bỏ khỏi thư viện và bảng nhanh, giữ nguyên file gốc để tải lên Meta. Theo dõi video chờ, đang xử lý hoặc lỗi trong Lịch xuất bản. Nếu tạo lịch thất bại, video vẫn ở thư viện. Chọn lại file đã bỏ sẽ đưa nó trở lại thư viện.
+Sau khi chọn file, **Thư viện video** hiển thị danh sách kèm khung hình xem trước, tên, dung lượng và đường dẫn. Video có codec không được trình duyệt hỗ trợ hoặc file không còn đọc được sẽ hiện “Không có ảnh xem trước”. Ngay sau khi nhận yêu cầu lên lịch, video tự được bỏ khỏi thư viện và bảng nhanh, chuyển file vào thư mục con **video đã đăng** và cập nhật đường dẫn để tải lên Meta. Theo dõi video chờ, đang xử lý hoặc lỗi trong Lịch xuất bản. Nếu tạo lịch thất bại, video vẫn ở thư viện. Chọn lại file đã bỏ sẽ đưa nó trở lại thư viện.
 
 Nút **Xóa khỏi thư viện** chỉ bỏ video khỏi danh sách, giữ nguyên file gốc và lịch sử đăng. Không cho xóa video có bài chờ, đang đăng/xử lý hoặc cần kiểm tra. Quét lại thư mục sẽ đưa video đã bỏ trở lại thư viện.
 
@@ -82,11 +82,26 @@ Tool cuộn trang, thử chuyển trang và gom link sản phẩm, nhận diện
 
 Đây là tính năng thử nghiệm, **chưa xác minh với shop thật**. Shopee có thể đổi DOM, yêu cầu đăng nhập, chặn trình duyệt hoặc chỉ tải video sau tương tác; nguồn blob/HLS không có MP4 trực tiếp chưa được hỗ trợ. Không cam kết lấy đủ toàn bộ video. Giới hạn mỗi lượt: 100 trang, 60 lần cuộn/trang và 1 GB/video; video không tìm được nguồn sẽ được bỏ qua, lỗi tải được hiển thị trong giao diện. Bản `npm start` không có cửa sổ Shopee; dùng `npm run desktop` sau khi cài dependencies hoặc build lại `.exe` để dùng chức năng này.
 
+## Ghép link Shopee Affiliate vào Excel video
+
+Sau khi tải video xong, mở **Ghép link Shopee Affiliate** trong tool:
+
+1. Chọn file Excel video đã xuất.
+2. Chọn file Shopee đối chiếu có cả link sản phẩm gốc và link affiliate. Hỗ trợ `.xlsx` và `.csv` UTF-8 (dấu phẩy hoặc chấm phẩy), tối đa 20 MB/file; `.xls` cần lưu lại thành `.xlsx` trước.
+3. Chọn sheet, dòng tiêu đề (trong 30 dòng đầu) và cột link gốc của từng file; chọn thêm cột affiliate trong file Shopee. Tool gợi ý cột theo tiêu đề, hiển thị dòng mẫu để kiểm tra.
+4. Bấm **Ghép và lưu Excel**, chọn nơi lưu bản `…-affiliate.xlsx`. Bản desktop mở hộp thoại lưu; bản trình duyệt dùng cơ chế tải file của trình duyệt. Hai file đầu vào giữ nguyên.
+
+File kết quả giữ thứ tự dòng, tên file video (kể cả `.mp4` và số khi trùng), các cột và sheet khác, thêm **Link affiliate** và **Trạng thái affiliate** vào sheet đã chọn. Nếu hai cột này đã có, tool cập nhật lại chúng theo file đối chiếu mới. Ghép bằng cặp ID shop/sản phẩm trong URL Shopee, không ghép theo tên hoặc vị trí dòng; link dạng `…-i.SHOPID.ITEMID` và `/product/SHOPID/ITEMID` vẫn khớp khi khác tham số theo dõi.
+
+Chỉ sao chép link affiliate bạn cung cấp, không tự tạo hoặc chuyển đổi affiliate. Dòng chưa tìm thấy để trống link và ghi trạng thái; cùng sản phẩm có nhiều affiliate khác nhau cũng để trống để bạn kiểm tra. Các bản ghi trùng cùng một affiliate được coi là một link. Link gốc rút gọn cần thay bằng URL sản phẩm đầy đủ vì tool không tự mở link rút gọn để suy đoán sản phẩm. Kết quả hiển thị tổng số ghép được, chưa khớp, xung đột và dòng đối chiếu không hợp lệ. Dữ liệu file chỉ xử lý trên máy chạy tool, giữ trong bộ nhớ tối đa 30 phút cho thao tác ghép; hết phiên cần chọn lại. Chưa tự comment hoặc đăng link lên Facebook.
+
 ## Dữ liệu lưu ở đâu?
 
-**File video gốc luôn được giữ nguyên:** thêm video chỉ lưu đường dẫn; xem trước và đăng bài chỉ đọc file. Xóa một hoặc nhiều video ở **Lên lịch nhanh** cũng bỏ chúng khỏi **Thư viện video** và ngược lại, không xóa/di chuyển/sửa file trên máy. Lên lịch, hủy lịch và bỏ video đã đăng cũng chỉ thay đổi dữ liệu trong tool. Bạn có thể chọn lại file để thêm vào thư viện. Nếu tự xóa hoặc di chuyển file bằng công cụ bên ngoài, tool có thể không đọc được video khi đến giờ đăng.
+Khi thêm video, tool tạo thư mục con **`video đã đăng`** ngay trong thư mục chứa từng file. File vẫn ở vị trí ban đầu cho tới khi tạo lịch thành công. Khi lưu lịch (từng video, hàng loạt hoặc Lên lịch nhanh/Đăng ngay), tool chuyển video vào thư mục con này, giữ nguyên tên và nội dung, đồng thời cập nhật đường dẫn trong database để tải lên Meta. Video nhập từ nhiều thư mục được chuyển vào thư mục con tương ứng của từng nơi. Video đã nằm trong `video đã đăng` sẽ không bị chuyển thêm một tầng.
 
-`data/reels.sqlite` chỉ lưu đường dẫn, thông tin video, caption, lịch, trạng thái và token Page đã mã hóa. **File gốc giữ nguyên ở thư mục bạn chọn.** Video từ bản upload cũ vẫn ở `data/` và dùng được; tool không tự xóa chúng. Sao lưu SQLite và khóa mã hóa; sao lưu video gốc riêng. Không commit `.env` hoặc `data/`.
+**Tên thư mục thể hiện video đã được xếp lịch, không xác nhận đã xuất bản trên Facebook.** Hủy lịch hoặc bài lỗi không tự chuyển file về chỗ cũ. Chọn lại video trong thư mục này để nhập lại nếu cần; quét thư mục cha không quét đệ quy nên không nhập lại các video đã chuyển. Nếu đích đã có file cùng tên, tool từ chối lượt tạo lịch để tránh ghi đè hoặc làm sai tên đối chiếu Excel. Lỗi chuẩn bị file khiến lượt tạo lịch bị hủy; file gốc vẫn được giữ. Tool sao chép file hoàn chỉnh, lưu đường dẫn/lịch, sau đó xóa bản cũ nên ổ đĩa cần đủ dung lượng tạm cho các video trong lượt. Nếu không xóa được bản cũ, lịch vẫn được lưu với đường dẫn mới và tool hiện cảnh báo bản trùng cần xử lý. Nếu app dừng bất ngờ, có thể còn bản sao ở hai nơi; kiểm tra đường dẫn trong tool trước khi xử lý bản trùng.
+
+Xóa khỏi thư viện, hủy lịch và Clear lịch sử không xóa file video. Không tự di chuyển/đổi tên/chỉnh sửa video ở đường dẫn mới trong lúc chờ tải lên. `data/reels.sqlite` lưu đường dẫn hiện tại, metadata video, caption, lịch, trạng thái và token Page đã mã hóa. Video từ bản upload cũ không có đường dẫn gốc vẫn ở `data/` và không tự chuyển. Sao lưu SQLite, khóa mã hóa và video riêng; không commit `.env` hoặc `data/`.
 
 ## Cấu hình Meta
 

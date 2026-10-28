@@ -7,7 +7,7 @@ import {tmpdir} from 'node:os';
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 const temp=await mkdtemp(join(tmpdir(),'reels-pc-smoke-')), folder=join(temp,'video space');
-const {mkdir}=await import('node:fs/promises');await mkdir(folder);const file=join(folder,'test.mp4');const bytes=Buffer.alloc(24);bytes.write('ftyp',4);await writeFile(file,bytes);
+const {mkdir}=await import('node:fs/promises');await mkdir(folder);let file=join(folder,'test.mp4');const bytes=Buffer.alloc(24);bytes.write('ftyp',4);await writeFile(file,bytes);
 const child=spawn(process.execPath,[process.env.SMOKE_SERVER_ENTRY || 'server.mjs'],{env:{...process.env,DATA_DIR:join(temp,'data'),PORT:'0',HOST:'127.0.0.1',APP_URL:'http://localhost:3000',ADMIN_PASSWORD:'',META_APP_ID:'',META_APP_SECRET:''},stdio:['ignore','pipe','pipe']});
 let db;try{
  let text='';await new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(Error('Startup timeout')),10000);child.once('exit',code=>{clearTimeout(timeout);reject(Error(`Server exited ${code}`));});child.stdout.on('data',chunk=>{text+=chunk;if(text.includes('listening')){clearTimeout(timeout);resolve();}});});
@@ -23,6 +23,7 @@ let db;try{
  db=new DatabaseSync(join(temp,'data','reels.sqlite'));db.prepare('INSERT INTO pages VALUES(?,?,?)').run('test-page','Test','no-real-token');
  const job={pageId:'test-page',mediaId:state.media[0].id,caption:'test',due:'2099-01-01T00:00:00Z'};assert.equal((await post('/api/jobs',job)).status,201);
  assert.equal((await (await fetch(base+'/api/state')).json()).media.length,0);
+ file=join(folder,'video đã đăng','test.mp4');
  assert.equal(db.prepare('SELECT path FROM media WHERE id=?').get(job.mediaId).path,await realpath(file));
  // Explicitly import again to exercise manual deletion guards on an active job.
  await post('/api/videos/import',{paths:[file]});
@@ -35,13 +36,13 @@ let db;try{
  assert.equal((await fetch(mediaUrl,{method:'DELETE'})).status,200);
  assert.equal((await (await fetch(base+'/api/state')).json()).media.length,0);
  assert.equal((await fetch(mediaUrl+'/preview')).status,404);
- assert.equal(await realpath(file),state.media[0].path);
+ assert.notEqual(await realpath(file),state.media[0].path);
  assert.deepEqual(await readFile(file),bytes,'Scheduling, cancellation and library deletion must preserve source bytes');
  assert.equal((await post('/api/jobs',job)).status,400);
- await post('/api/folders/import',{path:folder});
+ await post('/api/videos/import',{paths:[file]});
  assert.equal((await (await fetch(base+'/api/state')).json()).media[0].id,state.media[0].id);
  await writeFile(file,Buffer.concat([bytes,Buffer.from('changed')]));assert.equal((await post('/api/jobs',job)).status,400);
- const updated=await (await post('/api/folders/import',{path:folder})).json();assert.equal(updated.added,1);
+ const updated=await (await post('/api/videos/import',{paths:[file]})).json();assert.equal(updated.added,1);
  assert.equal((await fetch(base+'/api/folders/import',{method:'POST',headers:{Origin:'https://evil.example'},body:'{}'})).status,403);
  await writeFile(join(folder,'second.mp4'),bytes);await post('/api/folders/import',{path:folder});
  const current=(await (await fetch(base+'/api/state')).json()).media.filter(m=>m.id!==state.media[0].id);
@@ -97,7 +98,7 @@ let db;try{
  const cleared=await (await fetch(base+'/api/jobs/history',{method:'DELETE'})).json();assert.equal(cleared.count,removable);assert.ok(removable>0);
  assert.deepEqual(db.prepare('SELECT id FROM jobs ORDER BY id').all(),preserved);
  assert.deepEqual(db.prepare('SELECT * FROM media ORDER BY id').all(),mediaBefore);
- assert.deepEqual(await readFile(join(folder,'chosen.mp4')),bytes);
+ assert.deepEqual(await readFile(join(folder,'video đã đăng','chosen.mp4')),bytes);
  assert.equal((await (await fetch(base+'/api/jobs/history',{method:'DELETE'})).json()).count,0);
  console.log('PASS: history clearing preserves active jobs/media/files; library, retry and batch validation.');
 }finally{db?.close();const exit=once(child,'exit');child.kill();await exit;await rm(temp,{recursive:true,force:true});}
