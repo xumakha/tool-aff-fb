@@ -18,16 +18,16 @@ export async function mergeAffiliate({video,mapping}){if(video?.id===mapping?.id
  return {rows,stats};
 }
 
-const masterHeaders=['Liên kết gốc','Sub_id1','Sub_id2','Sub_id3','Sub_id4','Sub_id5','Tên sản phẩm','Link affiliate'];
+const masterHeaders=['Liên kết gốc','Tên sản phẩm','Link affiliate','Nội dung'];
 const writing=new Set();
 export async function appendAffiliate(file,input){
  if(writing.has(file))throw Error('Đang ghi file tổng hợp. Vui lòng đợi.');writing.add(file);
  const {readFile,stat,writeFile,rename,unlink}=await import('node:fs/promises');const {dirname,join}=await import('node:path');let temporary;
- try{const result=await mergeAffiliate(input);const before=await stat(file);if(before.size>50*1024*1024)throw Error('File tổng hợp vượt 50 MB');const book=new ExcelJS.Workbook();await book.xlsx.load(await readFile(file));let sheet=book.getWorksheet('Tổng hợp sản phẩm');if(!sheet)sheet=book.addWorksheet('Tổng hợp sản phẩm');
- if(sheet.actualRowCount===0)sheet.addRow(masterHeaders);else for(let i=0;i<masterHeaders.length;i++)if(sheet.getRow(1).getCell(i+1).text!==masterHeaders[i])throw Error('Sheet Tổng hợp sản phẩm phải có đúng tiêu đề A–H: '+masterHeaders.join(', '));
- const key=row=>JSON.stringify([productKey(row[0])||row[0],...row.slice(1)]);const existing=new Set();for(let i=2;i<=sheet.rowCount;i++)existing.add(key(masterHeaders.map((_,j)=>text(sheet.getRow(i).getCell(j+1)))));
- let added=0,duplicates=0;for(const row of result.rows){const id=key(row);if(existing.has(id)){duplicates++;continue;}sheet.addRow(row);existing.add(id);added++;}
- if(added){sheet.getColumn(1).width=65;sheet.getColumn(7).width=80;sheet.getColumn(8).width=65;temporary=join(dirname(file),`.affiliate-${randomUUID()}.tmp`);await writeFile(temporary,Buffer.from(await book.xlsx.writeBuffer()),{flag:'wx'});const current=await stat(file);if(current.size!==before.size||current.mtimeMs!==before.mtimeMs||current.ino!==before.ino)throw Error('File tổng hợp vừa thay đổi bên ngoài. Đóng Excel rồi thực hiện lại.');await rename(temporary,file);}
+ try{const result=await mergeAffiliate(input);const before=await stat(file);if(before.size>50*1024*1024)throw Error('File tổng hợp vượt 50 MB');const book=new ExcelJS.Workbook();await book.xlsx.load(await readFile(file));let sheet=book.getWorksheet('sheet 1');if(!sheet)sheet=book.addWorksheet('sheet 1');
+ if(sheet.actualRowCount===0)sheet.addRow(masterHeaders);else for(let i=0;i<masterHeaders.length;i++)if(sheet.getRow(1).getCell(i+1).text!==masterHeaders[i])throw Error('Tab sheet 1 phải có đúng tiêu đề A–D: '+masterHeaders.join(', '));
+ const key=row=>JSON.stringify([productKey(row[0])||row[0],...row.slice(1,3)]);const existing=new Set();for(let i=2;i<=sheet.rowCount;i++)existing.add(key(masterHeaders.map((_,j)=>text(sheet.getRow(i).getCell(j+1)))));
+ let added=0,duplicates=0;for(const source of result.rows){const row=[source[0],source[6],source[7],source[6]+'\n'+source[7]];const id=key(row);if(existing.has(id)){duplicates++;continue;}const addedRow=sheet.addRow(row);addedRow.getCell(4).alignment={wrapText:true,vertical:'top'};addedRow.height=45;existing.add(id);added++;}
+ if(added){sheet.getColumn(1).width=65;sheet.getColumn(2).width=80;sheet.getColumn(3).width=65;sheet.getColumn(4).width=90;temporary=join(dirname(file),`.affiliate-${randomUUID()}.tmp`);await writeFile(temporary,Buffer.from(await book.xlsx.writeBuffer()),{flag:'wx'});const current=await stat(file);if(current.size!==before.size||current.mtimeMs!==before.mtimeMs||current.ino!==before.ino)throw Error('File tổng hợp vừa thay đổi bên ngoài. Đóng Excel rồi thực hiện lại.');await rename(temporary,file);}
  return {path:file,added,duplicates,stats:result.stats};
  }catch(error){if(['EBUSY','EPERM','EACCES'].includes(error.code))throw Error('Không ghi được file tổng hợp. Hãy đóng file trong Excel và kiểm tra quyền ghi: '+file);throw error;}finally{if(temporary)await unlink(temporary).catch(()=>{});writing.delete(file);}
 }
