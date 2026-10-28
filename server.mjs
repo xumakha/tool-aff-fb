@@ -9,6 +9,13 @@ import {scanFolder, pickFolder, checkUnchanged, selectVideos} from './local-medi
 if (process.env.HOST && !['127.0.0.1','localhost','::1'].includes(process.env.HOST)) throw new Error('Bản PC chỉ lắng nghe localhost');
 const root = process.env.DATA_DIR || 'data'; mkdirSync(root,{recursive:true});
 const db = new DatabaseSync(`${root}/reels.sqlite`);
+db.exec('CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT)');
+const masterPath=()=>db.prepare("SELECT value FROM settings WHERE key='affiliate_master'").get()?.value||'';
+async function pickAffiliateMaster(){
+ if(process.env.DESKTOP_MODE!=='1'||!process.send)throw Error('Mở bản desktop Electron để chọn file tổng hợp cố định');
+ const id=randomBytes(16).toString('hex');return new Promise((resolve,reject)=>{const listener=message=>{if(message.type==='affiliate-master-picked'&&message.id===id){clearTimeout(timer);process.off('message',listener);message.error?reject(Error(message.error)):resolve(message.path||'');}};const timer=setTimeout(()=>{process.off('message',listener);reject(Error('Hết thời gian chọn file'));},180000);process.on('message',listener);process.send({type:'affiliate-master-pick',id});});
+}
+
 db.exec(`PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS pages(id TEXT PRIMARY KEY,name TEXT,token TEXT); CREATE TABLE IF NOT EXISTS media(id TEXT PRIMARY KEY,name TEXT,size INTEGER); CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,page_id TEXT,media_id TEXT,caption TEXT,due TEXT,status TEXT DEFAULT 'queued',video_id TEXT,error TEXT,created TEXT);`);
 // Additive migration preserves existing uploads and scheduled jobs.
 const columns = db.prepare('PRAGMA table_info(media)').all().map(c=>c.name);
@@ -68,12 +75,17 @@ const server=http.createServer(async(req,res)=>{try{
   const pages=await meta.pages(token.access_token);for(const p of pages)if(p.access_token)db.prepare('INSERT OR REPLACE INTO pages VALUES(?,?,?)').run(p.id,p.name,crypt(p.access_token));
   res.writeHead(302,{Location:'/', 'Set-Cookie':'meta_state=; HttpOnly; SameSite=Lax; Path=/auth; Max-Age=0'});return res.end();
  }
+ if(url.pathname==='/api/affiliate/master' && req.method==='GET')return json(res,200,{path:masterPath()});
+ if(url.pathname==='/api/affiliate/master' && req.method==='POST'){
+  const file=await pickAffiliateMaster();if(file)db.prepare('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)').run('affiliate_master',file);return json(res,200,{path:masterPath()});
+ }
  if(url.pathname==='/api/affiliate/inspect' && req.method==='POST'){
   const {inspectFile}=await import('./affiliate.mjs');return json(res,200,await inspectFile(JSON.parse(await body(req,29*1024*1024))));
  }
  if(url.pathname==='/api/affiliate/merge' && req.method==='POST'){
   if(shopeeState.running)throw Error('Đợi lượt tải Shopee kết thúc trước khi ghép affiliate');
-  const {mergeAffiliate}=await import('./affiliate.mjs');return json(res,200,await mergeAffiliate(JSON.parse(await body(req))));
+  const file=masterPath();if(!file)throw Error('Chọn file Excel tổng hợp cố định trước');
+  const {appendAffiliate}=await import('./affiliate.mjs');return json(res,200,await appendAffiliate(file,JSON.parse(await body(req))));
  }
  if(url.pathname==='/api/shopee' && req.method==='GET')return json(res,200,shopeeState);
  if(url.pathname==='/api/shopee' && req.method==='POST'){

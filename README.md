@@ -76,24 +76,27 @@ Nếu có file thay đổi/mất hoặc video đã có bài chờ, đang xử l�
 
 Trong **Chọn video → Tải video shop Shopee**, nhập link như `https://shopee.vn/ipone_vietnam`, bấm **Tải video của shop** và chọn thư mục lưu. App mở cửa sổ Shopee riêng; đăng nhập hoặc xử lý CAPTCHA tại đó nếu được yêu cầu. Phiên đăng nhập Shopee được lưu riêng trong dữ liệu Electron. Đóng cửa sổ Shopee để dừng lượt quét; các video đã tải vẫn được giữ.
 
-Sau khi chọn thư mục video, app mở hộp thoại **Lưu danh sách video Shopee** để chọn vị trí và tên file Excel `.xlsx`. Hủy hộp thoại sẽ hủy lượt tải. Excel có đúng hai cột: **Link sản phẩm** và **Tên sản phẩm**. Tên trong Excel là tên file video thực tế, **bao gồm `.mp4` và số thứ tự khi trùng tên**. Ví dụ `Áo đẹp (2).mp4`. Chỉ video tải thành công mới có dòng; file Excel được cập nhật sau từng video nên dừng quét vẫn giữ danh sách đã ghi. Nếu không tải được video nào, file chỉ có tiêu đề cột. Không mở Excel trong lúc tải để tránh Windows khóa file; nếu cập nhật Excel lỗi, lượt tải dừng và hiện thông báo, video đã tải được giữ nhưng dòng mới nhất có thể chưa được ghi.
+Sau khi chọn thư mục video, app mở hộp thoại **Lưu danh sách video Shopee** để chọn vị trí và tên file Excel `.xlsx`. Hủy hộp thoại sẽ hủy lượt tải. Excel có đúng 7 cột: **A: Liên kết gốc**, **B–F: Sub_id1, Sub_id2, Sub_id3, Sub_id4, Sub_id5**, **G: Tên sản phẩm**. Các cột Sub_id mặc định để trống để bạn điền trước khi chuyển đổi affiliate. Tên trong Excel là tên file video thực tế, **bao gồm `.mp4` và số thứ tự khi trùng tên**. Ví dụ `Áo đẹp (2).mp4`. Chỉ video tải thành công mới có dòng; file Excel được cập nhật sau từng video nên dừng quét vẫn giữ danh sách đã ghi. Nếu không tải được video nào, file chỉ có tiêu đề cột. Không mở Excel trong lúc tải để tránh Windows khóa file; nếu cập nhật Excel lỗi, lượt tải dừng và hiện thông báo, video đã tải được giữ nhưng dòng mới nhất có thể chưa được ghi.
 
 Tool cuộn trang, thử chuyển trang và gom link sản phẩm, nhận diện biểu tượng `.shopee_ic .stroke-none` (kèm biến thể cùng phần tử). Tool kiểm tra cả các sản phẩm không có biểu tượng để tránh phụ thuộc hoàn toàn vào class. Mỗi sản phẩm được mở để đọc nguồn MP4 từ video hoặc tài nguyên đã tải. Video lưu bằng tiêu đề sản phẩm, giữ tiếng Việt, thay ký tự không hợp lệ trên Windows; tên trùng được thêm số. File tải hoàn chỉnh được tự thêm vào thư viện. File tạm được xóa khi tải lỗi; không ghi đè video có sẵn. Chạy lại lượt tải có thể tạo thêm bản có số thứ tự.
 
 Đây là tính năng thử nghiệm, **chưa xác minh với shop thật**. Shopee có thể đổi DOM, yêu cầu đăng nhập, chặn trình duyệt hoặc chỉ tải video sau tương tác; nguồn blob/HLS không có MP4 trực tiếp chưa được hỗ trợ. Không cam kết lấy đủ toàn bộ video. Giới hạn mỗi lượt: 100 trang, 60 lần cuộn/trang và 1 GB/video; video không tìm được nguồn sẽ được bỏ qua, lỗi tải được hiển thị trong giao diện. Bản `npm start` không có cửa sổ Shopee; dùng `npm run desktop` sau khi cài dependencies hoặc build lại `.exe` để dùng chức năng này.
 
-## Ghép link Shopee Affiliate vào Excel video
+## Ghép link Shopee Affiliate vào Excel tổng hợp cố định
 
-Sau khi tải video xong, mở **Ghép link Shopee Affiliate** trong tool:
+Sau khi tải video và có file đối chiếu từ Shopee, mở **Ghép link Shopee Affiliate**:
 
-1. Chọn file Excel video đã xuất.
-2. Chọn file Shopee đối chiếu có cả link sản phẩm gốc và link affiliate. Hỗ trợ `.xlsx` và `.csv` UTF-8 (dấu phẩy hoặc chấm phẩy), tối đa 20 MB/file; `.xls` cần lưu lại thành `.xlsx` trước.
-3. Chọn sheet, dòng tiêu đề (trong 30 dòng đầu) và cột link gốc của từng file; chọn thêm cột affiliate trong file Shopee. Tool gợi ý cột theo tiêu đề, hiển thị dòng mẫu để kiểm tra.
-4. Bấm **Ghép và lưu Excel**, chọn nơi lưu bản `…-affiliate.xlsx`. Bản desktop mở hộp thoại lưu; bản trình duyệt dùng cơ chế tải file của trình duyệt. Hai file đầu vào giữ nguyên.
+1. Chọn Excel video đã xuất (A: Liên kết gốc, B–F: Sub_id1–Sub_id5, G: Tên sản phẩm).
+2. Chọn file Shopee có cả link sản phẩm gốc và link affiliate. Hai file đầu vào hỗ trợ `.xlsx` và `.csv` UTF-8 (dấu phẩy/chấm phẩy), tối đa 20 MB/file; `.xls` cần lưu lại thành `.xlsx` trước.
+3. Chọn sheet, dòng tiêu đề (trong 30 dòng đầu), cột link gốc của từng file và cột affiliate trong file Shopee. Kiểm tra dòng mẫu trước khi ghép.
+4. Bấm **Chọn file tổng hợp (.xlsx)** để chọn một file Excel có sẵn trên máy. Có thể dùng workbook trống; tool tạo sheet **Tổng hợp sản phẩm** trong file đó. Tool nhớ đường dẫn qua các lần mở app. Việc chọn và ghi trực tiếp file cố định dùng bản desktop Electron.
+5. Đóng file đó trong Excel, bấm **Ghép và thêm vào file tổng hợp**. Tool thêm dòng vào chính file đã chọn, không tải xuống/tạo thêm file kết quả sau mỗi lượt.
 
-File kết quả giữ thứ tự dòng, tên file video (kể cả `.mp4` và số khi trùng), các cột và sheet khác, thêm **Link affiliate** và **Trạng thái affiliate** vào sheet đã chọn. Nếu hai cột này đã có, tool cập nhật lại chúng theo file đối chiếu mới. Ghép bằng cặp ID shop/sản phẩm trong URL Shopee, không ghép theo tên hoặc vị trí dòng; link dạng `…-i.SHOPID.ITEMID` và `/product/SHOPID/ITEMID` vẫn khớp khi khác tham số theo dõi.
+Sheet **Tổng hợp sản phẩm** có A–G giống Excel video và **H: Link affiliate**. Giữ nguyên tên file video và giá trị Sub_id đã điền; chỉ thêm các dòng có tên sản phẩm và ghép được duy nhất một link affiliate hợp lệ. Sheet tổng hợp đã có phải có đúng tiêu đề A–H; các sheet khác và dòng cũ được giữ. File nguồn hai bên không bị sửa. Tool đọc lại file tổng hợp từ ổ đĩa mỗi lượt và ghi qua file tạm rồi thay thế file đích khi hoàn tất; nếu file bị khóa hoặc vừa thay đổi bên ngoài thì báo lỗi thay vì báo thành công.
 
-Chỉ sao chép link affiliate bạn cung cấp, không tự tạo hoặc chuyển đổi affiliate. Dòng chưa tìm thấy để trống link và ghi trạng thái; cùng sản phẩm có nhiều affiliate khác nhau cũng để trống để bạn kiểm tra. Các bản ghi trùng cùng một affiliate được coi là một link. Link gốc rút gọn cần thay bằng URL sản phẩm đầy đủ vì tool không tự mở link rút gọn để suy đoán sản phẩm. Kết quả hiển thị tổng số ghép được, chưa khớp, xung đột và dòng đối chiếu không hợp lệ. Dữ liệu file chỉ xử lý trên máy chạy tool, giữ trong bộ nhớ tối đa 30 phút cho thao tác ghép; hết phiên cần chọn lại. Chưa tự comment hoặc đăng link lên Facebook.
+Ghép bằng cặp ID shop/sản phẩm: URL dạng `…-i.SHOPID.ITEMID` và `/product/SHOPID/ITEMID` vẫn khớp khi khác slug/tham số. Link gốc rút gọn cần thay bằng URL sản phẩm đầy đủ. Dòng chưa khớp hoặc có nhiều affiliate khác nhau không được thêm vào tổng hợp; tổng số từng loại được hiển thị sau khi ghép. Dòng đã có cùng sản phẩm, 5 Sub_id, tên video và affiliate được bỏ qua; thay đổi một trong các giá trị này được coi là bản ghi mới. Các Sub_id dùng từ file video; tool không tự suy đoán từ link affiliate.
+
+Tool chỉ sao chép affiliate từ file bạn cung cấp, không tự chuyển đổi link và chưa tự comment lên Facebook. Dữ liệu hai file nguồn được xử lý trên máy chạy tool, giữ trong bộ nhớ tối đa 30 phút (tối đa 8 file/phiên thời gian này); hết phiên cần chọn lại. File tổng hợp tối đa 50 MB. Chọn lại file tổng hợp khi đổi vị trí hoặc chuyển máy.
 
 ## Dữ liệu lưu ở đâu?
 
