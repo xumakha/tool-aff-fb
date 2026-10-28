@@ -18,11 +18,17 @@ export class Meta {
     return pages;
   }
   async begin(page, token) { return this.request(`${page}/video_reels`, token, {upload_phase:'start'}); }
-  async upload(url, token, bytes, size = bytes.length) {
+  async upload(url, token, bytes, size = bytes.length, onProgress) {
     const target = new URL(url);
     if (target.protocol !== 'https:' || !(target.hostname === 'rupload.facebook.com' || target.hostname.endsWith('.rupload.facebook.com'))) throw new Error('Địa chỉ upload Meta không hợp lệ');
     if(!Number.isSafeInteger(size) || size<=0)throw Error('Dung lượng video upload không hợp lệ');
-    const response = await this.fetch(target, {method:'POST', headers:{Authorization:`OAuth ${token}`, offset:'0', file_size:String(size),'Content-Length':String(size),'Content-Type':'application/octet-stream'},body:bytes,...(typeof bytes.pipe === 'function' ? {duplex:'half'} : {}),signal:AbortSignal.timeout(600000)});
+    let body=bytes;
+    if(onProgress && typeof bytes.pipe==='function'){
+      const {Transform}=await import('node:stream');let sent=0;
+      const counter=new Transform({transform(chunk,encoding,done){sent+=chunk.length;onProgress(Math.min(sent,size),size);done(null,chunk);}});
+      bytes.on('error',error=>counter.destroy(error));body=bytes.pipe(counter);
+    }
+    const response = await this.fetch(target, {method:'POST', headers:{Authorization:`OAuth ${token}`, offset:'0', file_size:String(size),'Content-Length':String(size),'Content-Type':'application/octet-stream'},body,...(typeof body.pipe === 'function' ? {duplex:'half'} : {}),signal:AbortSignal.timeout(600000)});
     let result;
     try{result=await response.json();}catch{throw Error(`Upload Meta thất bại (HTTP ${Number(response.status) || 0}; phản hồi không phải JSON). Kiểm tra mạng/proxy và trạng thái video trên Facebook.`);}
     if (!response.ok || !result?.success){
@@ -34,5 +40,6 @@ export class Meta {
     }
   }
   async finish(page, token, video, caption) { return this.request(`${page}/video_reels`, token, {upload_phase:'finish',video_id:video,video_state:'PUBLISHED',description:caption}); }
+  async schedule(page, token, video, caption, due) { return this.request(`${page}/video_reels`, token, {upload_phase:'finish',video_id:video,video_state:'SCHEDULED',scheduled_publish_time:String(Math.floor(new Date(due).getTime()/1000)),description:caption}); }
   async status(video, token) { return this.request(`${video}?fields=status,permalink_url`, token); }
 }

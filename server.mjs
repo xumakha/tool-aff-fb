@@ -12,19 +12,21 @@ db.exec(`PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS pages(id TEXT PRIMA
 // Additive migration preserves existing uploads and scheduled jobs.
 const columns = db.prepare('PRAGMA table_info(media)').all().map(c=>c.name);
 for (const [name,type] of [['path','TEXT'],['mtime','REAL'],['folder','TEXT'],['hidden','INTEGER DEFAULT 0']]) if (!columns.includes(name)) db.exec(`ALTER TABLE media ADD COLUMN ${name} ${type}`);
+const jobColumns=db.prepare('PRAGMA table_info(jobs)').all().map(c=>c.name);
+for(const [name,type] of [['batch_id','TEXT'],['progress','INTEGER DEFAULT 0'],['remote_now','INTEGER DEFAULT 0']])if(!jobColumns.includes(name))db.exec(`ALTER TABLE jobs ADD COLUMN ${name} ${type}`);
 // Hide scheduled media atomically with job creation, preserving source and history.
 db.exec(`CREATE TRIGGER IF NOT EXISTS hide_scheduled_media AFTER INSERT ON jobs
  BEGIN UPDATE media SET hidden=1 WHERE id=NEW.media_id; END;`);
 // Keep history and source files; remove confirmed publications from the library.
 db.exec(`CREATE TRIGGER IF NOT EXISTS restore_cancelled_media AFTER UPDATE OF status ON jobs
  WHEN NEW.status='cancelled' AND OLD.status!='cancelled'
- AND NOT EXISTS(SELECT 1 FROM jobs WHERE media_id=NEW.media_id AND status IN ('queued','running','processing','review'))
+ AND NOT EXISTS(SELECT 1 FROM jobs WHERE media_id=NEW.media_id AND status IN ('queued','running','processing','review','remote_queued','remote_uploading','remote_confirming'))
  BEGIN UPDATE media SET hidden=0 WHERE id=NEW.media_id; END;`);
 db.exec(`CREATE TRIGGER IF NOT EXISTS hide_published_media AFTER UPDATE OF status ON jobs
  WHEN NEW.status='published' AND OLD.status!='published'
  BEGIN UPDATE media SET hidden=1 WHERE id=NEW.media_id; END;`);
 // An interrupted publish must be reconciled, never blindly repeated.
-db.exec("UPDATE jobs SET status='review',error='Worker bị gián đoạn. Kiểm tra trên Facebook trước khi thử lại.' WHERE status='running'");
+db.exec("UPDATE jobs SET status='review',error='Worker bị gián đoạn. Kiểm tra trên Facebook trước khi thử lại.' WHERE status IN ('running','remote_uploading','remote_confirming')");
 const config = () => !!(process.env.META_APP_ID && process.env.META_APP_SECRET && /^v\d+\.\d+$/.test(process.env.META_GRAPH_VERSION || '') && /^[a-f0-9]{64}$/i.test(process.env.TOKEN_ENCRYPTION_KEY || ''));
 const meta = new Meta({version:process.env.META_GRAPH_VERSION,appSecret:process.env.META_APP_SECRET});
 function crypt(value, decrypt=false) {
@@ -81,7 +83,7 @@ const server=http.createServer(async(req,res)=>{try{
   const media=db.prepare('SELECT * FROM media WHERE id=? AND COALESCE(hidden,0)=0').get(mediaRoute[1]);
   if(!media)return json(res,404,{error:'Video không còn trong thư viện'});
   if(req.method==='DELETE' && !mediaRoute[2]){
-   if(db.prepare("SELECT id FROM jobs WHERE media_id=? AND status IN ('queued','running','processing','review')").get(media.id))return json(res,409,{error:'Video đang có lịch đăng hoặc bài cần kiểm tra. Hủy lịch chờ và xử lý bài đang đăng trước khi xóa.'});
+   if(db.prepare("SELECT id FROM jobs WHERE media_id=? AND status IN ('queued','running','processing','review','remote_queued','remote_uploading','remote_confirming')").get(media.id))return json(res,409,{error:'Video đang có lịch đăng hoặc bài cần kiểm tra. Hủy lịch chờ và xử lý bài đang đăng trước khi xóa.'});
    db.prepare('UPDATE media SET hidden=1 WHERE id=?').run(media.id);
    return json(res,200,{ok:true});
   }
@@ -105,6 +107,9 @@ const server=http.createServer(async(req,res)=>{try{
  }
  if(url.pathname==='/api/jobs/batch' && req.method==='POST'){
   const input=JSON.parse(await body(req));
+  const remote=input.remote===true;
+  if(remote && !config())throw Error('Cấu hình Meta chưa đầy đủ');
+  if(remote && db.prepare("SELECT id FROM jobs WHERE status IN ('remote_queued','remote_uploading','remote_confirming') LIMIT 1").get())throw Error('Một lượt tải lên Meta đang chạy. Đợi lượt đó hoàn tất trước khi gửi thêm.');
   if(!db.prepare('SELECT id FROM pages WHERE id=?').get(input.pageId || ''))throw Error('Chọn Page đã kết nối');
   const custom=Array.isArray(input.items);
   if(custom)input.mediaIds=input.items.map(item=>item?.mediaId);
@@ -116,6 +121,7 @@ const server=http.createServer(async(req,res)=>{try{
   for(const item of items){
    if(typeof item.caption!=='string' || item.caption.length>2200 || (!item.now && (!Number.isFinite(Date.parse(item.due)) || Date.parse(item.due)<=now)) || (item.now!==undefined && typeof item.now!=='boolean'))throw Error('Mỗi video cần caption tối đa 2200 ký tự và giờ đăng trong tương lai hoặc chọn Đăng ngay');
    item.due=item.now?new Date(now).toISOString():new Date(item.due).toISOString();
+   if(remote && !item.now && Date.parse(item.due)<now+15*60000)throw Error('Lịch trên Facebook phải bắt đầu ít nhất 15 phút sau thời điểm bấm đăng. Với nhiều video, hãy chừa thêm thời gian upload.');
   }
   for(const id of input.mediaIds){
    const media=db.prepare('SELECT * FROM media WHERE id=? AND COALESCE(hidden,0)=0').get(id);
@@ -123,16 +129,19 @@ const server=http.createServer(async(req,res)=>{try{
    if(media.path)await checkUnchanged(media);
   }
   db.exec('BEGIN');
+  const batchId=remote?randomBytes(16).toString('hex'):null;
   try{
    for(const [index,id] of input.mediaIds.entries()){
     if(!db.prepare('SELECT id FROM media WHERE id=? AND COALESCE(hidden,0)=0').get(id))throw Error('Thư viện đã thay đổi. Hãy làm mới danh sách.');
-    const conflict=db.prepare("SELECT jobs.status,media.name FROM jobs JOIN media ON media.id=jobs.media_id WHERE page_id=? AND media_id=? AND status IN ('queued','running','processing','review') LIMIT 1").get(input.pageId,id);
+    const conflict=db.prepare("SELECT jobs.status,media.name FROM jobs JOIN media ON media.id=jobs.media_id WHERE page_id=? AND media_id=? AND status IN ('queued','running','processing','review','remote_queued','remote_uploading','remote_confirming','remote_scheduled') LIMIT 1").get(input.pageId,id);
     if(conflict)throw Error(`Video "${conflict.name}" còn bài ${conflict.status==='review'?'Cần kiểm tra':'đang chờ hoặc đang xử lý'} trên Page này. Lịch đã hủy không chặn đăng lại. Chưa tạo lịch nào; xử lý bài này trong Lịch xuất bản.`);
-    db.prepare('INSERT INTO jobs(id,page_id,media_id,caption,due,created) VALUES(?,?,?,?,?,?)').run(randomBytes(16).toString('hex'),input.pageId,id,items[index].caption,items[index].due,new Date().toISOString());
+    if(remote)db.prepare('INSERT INTO jobs(id,page_id,media_id,caption,due,status,created,batch_id,progress,remote_now) VALUES(?,?,?,?,?,?,?,?,0,?)').run(randomBytes(16).toString('hex'),input.pageId,id,items[index].caption,items[index].due,'remote_queued',new Date().toISOString(),batchId,items[index].now?1:0);
+    else db.prepare('INSERT INTO jobs(id,page_id,media_id,caption,due,created) VALUES(?,?,?,?,?,?)').run(randomBytes(16).toString('hex'),input.pageId,id,items[index].caption,items[index].due,new Date().toISOString());
    }
    db.exec('COMMIT');
   }catch(error){db.exec('ROLLBACK');throw error;}
-  return json(res,201,{ok:true,count:input.mediaIds.length});
+  if(remote)setImmediate(()=>tick().catch(()=>console.error('Worker gặp lỗi nội bộ')));
+  return json(res,201,{ok:true,count:input.mediaIds.length,batchId});
  }
  if(url.pathname==='/api/jobs' && req.method==='POST'){
   const input=JSON.parse(await body(req));if(!db.prepare('SELECT id FROM pages WHERE id=?').get(input.pageId || '') || !db.prepare('SELECT id FROM media WHERE id=? AND COALESCE(hidden,0)=0').get(input.mediaId || ''))throw new Error('Chọn Page đã kết nối và video');
@@ -151,13 +160,39 @@ const server=http.createServer(async(req,res)=>{try{
   return json(res,200,{ok:true,count:result.changes});
  }
  if(url.pathname.startsWith('/api/jobs/') && req.method==='DELETE'){
-  const result=db.prepare("UPDATE jobs SET status='cancelled' WHERE id=? AND status='queued'").run(url.pathname.split('/').pop());return json(res,result.changes?200:409,{ok:!!result.changes});
+  const result=db.prepare("UPDATE jobs SET status='cancelled' WHERE id=? AND status IN ('queued','remote_queued')").run(url.pathname.split('/').pop());return json(res,result.changes?200:409,{ok:!!result.changes});
  }
  if(req.method==='GET' && ['/', '/app.js','/quick.js','/style.css'].includes(url.pathname)){const file=url.pathname==='/'?'index.html':url.pathname.slice(1);res.writeHead(200,{'Content-Type':file.endsWith('.html')?'text/html; charset=utf-8':file.endsWith('.js')?'text/javascript':'text/css','Content-Security-Policy':"default-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",'X-Content-Type-Options':'nosniff'});return res.end(readFileSync(fileURLToPath(new URL(`./public/${file}`,import.meta.url))));}
  json(res,404,{error:'Không tìm thấy'});
  }catch(error){json(res,400,{error:error.message});}});
 let busy=false;
 async function tick(){if(busy || !config())return;busy=true;try{
+ const remote=db.prepare("SELECT * FROM jobs WHERE status='remote_queued' ORDER BY created,id LIMIT 1").get();
+ if(remote){
+  db.prepare("UPDATE jobs SET status='remote_uploading',progress=0 WHERE id=? AND status='remote_queued'").run(remote.id);
+  try{
+   const page=db.prepare('SELECT * FROM pages WHERE id=?').get(remote.page_id),token=crypt(page.token,true);
+   const media=db.prepare('SELECT * FROM media WHERE id=?').get(remote.media_id);
+   if(media.path)await checkUnchanged(media);
+   if(!remote.remote_now && Date.parse(remote.due)<Date.now()+15*60000)throw Error('Giờ hẹn quá gần sau khi đợi upload. Chưa gửi lịch lên Meta.');
+   const started=await meta.begin(page.id,token);
+   if(!started.video_id || !started.upload_url)throw Error('Meta không trả về phiên upload');
+   db.prepare('UPDATE jobs SET video_id=? WHERE id=?').run(String(started.video_id),remote.id);
+   let previous=0;const stream=createReadStream(media.path || `${root}/${remote.media_id}`);
+   try{await meta.upload(started.upload_url,token,stream,media.size,(sent,size)=>{
+    const progress=Math.min(95,Math.floor(sent/size*95));
+    if(progress>previous){previous=progress;db.prepare('UPDATE jobs SET progress=? WHERE id=?').run(progress,remote.id);}
+   });}finally{stream.destroy();}
+   db.prepare("UPDATE jobs SET status='remote_confirming',progress=96 WHERE id=?").run(remote.id);
+   if(!remote.remote_now && Date.parse(remote.due)<Date.now()+10*60000)throw Error('Upload xong nhưng giờ hẹn đã quá gần. Kiểm tra video trên Facebook trước khi lên lịch lại.');
+   const result=remote.remote_now?await meta.finish(page.id,token,started.video_id,remote.caption):await meta.schedule(page.id,token,started.video_id,remote.caption,remote.due);
+   if(!result.success)throw Error('Meta chưa xác nhận lịch đăng');
+   db.prepare('UPDATE jobs SET status=?,progress=100,error=NULL WHERE id=?').run(remote.remote_now?'processing':'remote_scheduled',remote.id);
+  }catch(error){
+   db.prepare("UPDATE jobs SET status='review',error=? WHERE id=?").run(`${error.message} Kiểm tra video trên Facebook trước khi thử lại.`,remote.id);
+  }
+  return;
+ }
  const pending=db.prepare("SELECT * FROM jobs WHERE status='processing' LIMIT 1").get();
  if(pending){const p=db.prepare('SELECT * FROM pages WHERE id=?').get(pending.page_id);try{const result=await meta.status(pending.video_id,crypt(p.token,true));if(result.status?.video_status==='ready')db.prepare("UPDATE jobs SET status='published',error=NULL WHERE id=?").run(pending.id);else if(result.status?.video_status==='error')db.prepare("UPDATE jobs SET status='review',error='Meta xử lý video thất bại; kiểm tra trên Facebook.' WHERE id=?").run(pending.id);}catch{db.prepare("UPDATE jobs SET error='Chưa kiểm tra được trạng thái Meta; worker sẽ kiểm tra lại.' WHERE id=?").run(pending.id);}}
  const job=db.prepare("SELECT * FROM jobs WHERE status='queued' AND due<=? ORDER BY due LIMIT 1").get(new Date().toISOString());if(!job)return;
@@ -165,6 +200,6 @@ async function tick(){if(busy || !config())return;busy=true;try{
  try{const p=db.prepare('SELECT * FROM pages WHERE id=?').get(job.page_id),token=crypt(p.token,true);const media=db.prepare('SELECT * FROM media WHERE id=?').get(job.media_id);if(media.path)await checkUnchanged(media);
  const started=await meta.begin(p.id,token);if(!started.video_id || !started.upload_url)throw new Error('Meta không trả về phiên upload');db.prepare('UPDATE jobs SET video_id=? WHERE id=?').run(String(started.video_id),job.id);const stream=createReadStream(media.path || `${root}/${job.media_id}`);try{await meta.upload(started.upload_url,token,stream,media.size);}finally{stream.destroy();}const finished=await meta.finish(p.id,token,started.video_id,job.caption);if(!finished.success)throw new Error('Meta chưa xác nhận yêu cầu đăng');db.prepare("UPDATE jobs SET status='processing' WHERE id=?").run(job.id);
  }catch(error){db.prepare("UPDATE jobs SET status='review',error=? WHERE id=?").run(`${error.message} Kiểm tra Facebook trước khi tạo lại lịch.`,job.id);}
- }finally{busy=false;}}
+ }finally{busy=false;if(db.prepare("SELECT id FROM jobs WHERE status='remote_queued' LIMIT 1").get())setImmediate(()=>tick().catch(()=>console.error('Worker gặp lỗi nội bộ')));}}
 setInterval(()=>tick().catch(()=>console.error('Worker gặp lỗi nội bộ')),15000).unref();
 server.listen(Number(process.env.PORT || 3000),process.env.HOST || '127.0.0.1',()=>{console.log(`Reels Desk listening on port ${server.address().port}`);if(process.send)process.send({type:'ready',port:server.address().port});});

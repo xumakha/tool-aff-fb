@@ -16,7 +16,7 @@ Nếu chuyển từ bản chạy bằng `npm start`: dừng hoàn toàn bản c�
 
 Đăng nhập Facebook mở trong trình duyệt mặc định của Windows. Hoàn tất quyền rồi quay lại app; danh sách Page tự cập nhật. Nếu đặt ADMIN_PASSWORD, trình duyệt ngoài có thể yêu cầu username bất kỳ và mật khẩu đó. Desktop dùng API chính thức nên yêu cầu Meta App/OAuth vẫn áp dụng. Khi dùng APP_URL HTTPS qua reverse proxy, bảo vệ truy cập bằng mật khẩu.
 
-App giữ worker chạy trong lúc cửa sổ mở và hạn chế tự sleep; không thể bảo đảm đăng khi bạn chủ động sleep/tắt máy, mất mạng hoặc thoát app. Đóng cửa sổ app là thoát worker, không chạy ngầm qua system tray.
+App giữ worker chạy trong lúc cửa sổ mở và hạn chế tự sleep. Với Lên lịch nhanh, giữ app/máy mở đến khi tất cả video hiện Meta đã nhận lịch; lúc đó lịch được giữ trên Facebook và có thể tắt máy. Nếu tắt khi còn video đang tải hoặc cần kiểm tra, lịch chưa được xác nhận đầy đủ. Lịch PC cũ vẫn cần app chạy đến giờ đăng. Đóng cửa sổ app là thoát worker, không chạy ngầm qua system tray.
 
 ### Build từ mã nguồn
 
@@ -54,19 +54,19 @@ Nếu Git yêu cầu đăng nhập, dùng tài khoản GitHub có quyền ghi re
 1. Bấm **Chọn video trên PC** hoặc **Thêm video** trong bảng nhanh. Mở thư mục và giữ Ctrl/Shift để chọn các file MP4/MOV cần thêm, rồi bấm Open.
 2. Chỉ các file đã chọn được thêm vào thư viện (tối đa 1000 file/lần). Có thể thêm nhiều lần; file không thay đổi không bị tạo trùng. Hủy hộp thoại không thêm video nào.
 3. Kết nối Facebook, chọn Page, video, caption và giờ Việt Nam; lưu lịch hoặc đăng ngay.
-4. Đến giờ, worker đọc file gốc theo luồng và tải trực tiếp sang Meta; không giữ toàn bộ video trong RAM.
+4. Trong Lên lịch nhanh, app đọc file gốc theo luồng và tải lên Meta ngay, không giữ toàn bộ video trong RAM. Sau khi Meta xác nhận lịch, có thể tắt máy.
 
-Sau khi chọn file, **Thư viện video** hiển thị danh sách kèm khung hình xem trước, tên, dung lượng và đường dẫn. Video có codec không được trình duyệt hỗ trợ hoặc file không còn đọc được sẽ hiện “Không có ảnh xem trước”. Ngay sau khi lưu lịch thành công (kể cả Đăng ngay), video tự được bỏ khỏi thư viện và bảng nhanh, giữ nguyên file gốc và dữ liệu để worker đăng bài. Theo dõi video chờ, đang xử lý hoặc lỗi trong Lịch xuất bản. Nếu tạo lịch thất bại, video vẫn ở thư viện. Chọn lại file đã bỏ sẽ đưa nó trở lại thư viện.
+Sau khi chọn file, **Thư viện video** hiển thị danh sách kèm khung hình xem trước, tên, dung lượng và đường dẫn. Video có codec không được trình duyệt hỗ trợ hoặc file không còn đọc được sẽ hiện “Không có ảnh xem trước”. Ngay sau khi nhận yêu cầu lên lịch, video tự được bỏ khỏi thư viện và bảng nhanh, giữ nguyên file gốc để tải lên Meta. Theo dõi video chờ, đang xử lý hoặc lỗi trong Lịch xuất bản. Nếu tạo lịch thất bại, video vẫn ở thư viện. Chọn lại file đã bỏ sẽ đưa nó trở lại thư viện.
 
 Nút **Xóa khỏi thư viện** chỉ bỏ video khỏi danh sách, giữ nguyên file gốc và lịch sử đăng. Không cho xóa video có bài chờ, đang đăng/xử lý hoặc cần kiểm tra. Quét lại thư mục sẽ đưa video đã bỏ trở lại thư viện.
 
-**Máy phải bật, không sleep, có mạng và tool phải chạy khi đến lịch.** Nếu tool tắt hoặc PC sleep, bài quá hạn sẽ được xử lý khi tool chạy lại. Đóng tab trình duyệt không dừng worker; đóng cửa sổ terminal sẽ dừng. Ổ đĩa ngoài/ổ mạng phải được kết nối và đọc được bởi tài khoản chạy tool.
+**Lên lịch nhanh:** máy phải bật, có mạng, app chạy và ổ video còn kết nối trong suốt quá trình tải lên. Thanh tiến độ chỉ đạt 100% sau phản hồi xác nhận của Meta. Chỉ khi toàn bộ video hiện Meta đã nhận lịch mới tắt app/máy. Nếu app dừng giữa upload, bài chuyển Cần kiểm tra; không tự đăng lại để tránh trùng. Lịch PC cũ vẫn cần app chạy đến giờ đăng.
 
 Không di chuyển, đổi tên, xóa hoặc chỉnh sửa video đã lên lịch. Tool so sánh kích thước và thời gian sửa file trước khi đăng; nếu khác, bài chuyển sang cần kiểm tra. Quét lại thư mục để nhập phiên bản mới và tạo lịch mới. Đây là kiểm tra metadata, không phải hash toàn bộ video.
 
 ### Lên lịch từng video hoặc toàn bộ thư viện
 
-**Lên lịch nhanh** hiển thị mỗi video một dòng có ảnh thu nhỏ, caption và giờ riêng. Chọn Page; chia giờ, áp dụng caption chung hoặc lấy tên video làm caption sẽ tác động lên **toàn bộ video trong thư viện**. Có thể sửa từng dòng trước khi bấm **Lên lịch/Đăng video** để lưu tất cả. Checkbox chỉ dùng để chọn video cần xóa khỏi tool, không ảnh hưởng đến việc lên lịch. Dòng chọn **Đăng ngay** sẽ vào hàng chờ xử lý ngay khi lưu. Bản nháp được giữ khi tự làm mới dữ liệu, nhưng không lưu qua việc đóng/tải lại cửa sổ. Khung **Facebook Pages** mặc định thu gọn; bấm tiêu đề để mở.
+**Lên lịch nhanh** hiển thị mỗi video một dòng có ảnh thu nhỏ, caption và giờ riêng. Chọn Page; chia giờ, áp dụng caption chung hoặc lấy tên video làm caption sẽ tác động lên **toàn bộ video trong thư viện**. Có thể sửa từng dòng trước khi bấm **Lên lịch/Đăng video** để lưu tất cả. Checkbox chỉ dùng để chọn video cần xóa khỏi tool, không ảnh hưởng đến việc lên lịch. Dòng chọn **Đăng ngay** được tải lên Meta ngay; phải đợi Meta xác nhận xuất bản trước khi tắt máy. Lịch Facebook cần cách thời điểm bấm đăng ít nhất 15 phút; với nhiều video phải chừa đủ thời gian tải cả loạt. Bản nháp được giữ khi tự làm mới dữ liệu, nhưng không lưu qua việc đóng/tải lại cửa sổ. Khung **Facebook Pages** mặc định thu gọn; bấm tiêu đề để mở.
 
 Trong **Tạo lịch đăng → Phạm vi lên lịch**, chọn **Từng video** để đặt Page, caption và giờ riêng; hoặc **Tất cả video trong thư viện** để đặt chung Page/caption, giờ bắt đầu và khoảng cách giữa các bài (phút). Chế độ tất cả xếp theo tên video, hiển thị giờ đầu–cuối và tạo tối đa 1000 lịch một lần. Ví dụ bắt đầu 09:00, cách 60 phút sẽ đăng lần lượt 09:00, 10:00, 11:00.
 

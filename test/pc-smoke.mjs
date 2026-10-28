@@ -46,6 +46,7 @@ let db;try{
  await writeFile(join(folder,'second.mp4'),bytes);await post('/api/folders/import',{path:folder});
  const current=(await (await fetch(base+'/api/state')).json()).media.filter(m=>m.id!==state.media[0].id);
  const batch={pageId:'test-page',mediaIds:current.map(m=>m.id),caption:'Batch',due:'2099-02-01T00:00:00Z',intervalMinutes:30};
+ assert.equal((await post('/api/jobs/batch',{...batch,remote:true})).status,400,'Remote scheduling requires configured Meta credentials');
  const countJobs=()=>db.prepare('SELECT COUNT(*) AS n FROM jobs').get().n;
  const before=countJobs();
  assert.equal((await post('/api/jobs/batch',{...batch,intervalMinutes:0})).status,400);

@@ -11,7 +11,7 @@ export function createQuickScheduler({request,toast,reload}){
  document.querySelector('.schedule').before(section);
  section.querySelector('a[href="#compose"]').onclick=event=>{event.preventDefault();document.getElementById('pick-videos').click();};
  document.querySelector('nav').insertAdjacentHTML('beforeend','<a href="#quick-schedule">▦ Lên lịch nhanh</a>');
- const get=id=>section.querySelector('#quick-'+id),drafts=new Map(),deleting=new Set();let rows=[],signature='',saving=false;
+ const get=id=>section.querySelector('#quick-'+id),drafts=new Map(),deleting=new Set();let rows=[],signature='',saving=false,remoteBusy=false;
  get('start').value=localTime(Date.now()+3600000);
  const selected=()=>rows.filter(m=>drafts.get(m.id)?.selected);
  const observer=new IntersectionObserver(entries=>{for(const {target,isIntersecting} of entries)if(isIntersecting){target.src=target.dataset.src;observer.unobserve(target);}},{rootMargin:'100px'});
@@ -20,7 +20,7 @@ export function createQuickScheduler({request,toast,reload}){
   const n=selected().length,invalid=rows.filter(m=>!validDraft(drafts.get(m.id))).length;
   get('count').textContent=`${rows.length} video trong thư viện · ${n} video tick để xóa`+(invalid?` · ${invalid} dòng thiếu caption hoặc giờ hợp lệ`:rows.length && !get('page').value?' · Chọn Facebook Page':'');
   get('all').checked=!!rows.length && n===rows.length;get('all').indeterminate=n>0 && n<rows.length;
-  get('save').disabled=saving || deleting.size>0 || !rows.length || invalid>0 || !get('page').value;
+  get('save').disabled=saving || remoteBusy || deleting.size>0 || !rows.length || invalid>0 || !get('page').value;
   get('delete').disabled=saving || deleting.size>0 || !n;
  }
  get('page').onchange=count;
@@ -56,18 +56,20 @@ export function createQuickScheduler({request,toast,reload}){
  get('copy').onclick=()=>apply(d=>{d.caption=get('caption').value;});
  get('names').onclick=()=>apply((d,m)=>{d.caption=m.name.replace(/\.(mp4|mov)$/i,'').slice(0,2200);});
  get('save').onclick=async()=>{
-  const chosen=[...rows];if(!chosen.length || saving || deleting.size)return;
+  const chosen=[...rows];if(!chosen.length || saving || remoteBusy || deleting.size)return;
   try{
    if(!get('page').value)throw Error('Chọn Facebook Page cho bảng lên lịch nhanh');
    if(chosen.some(m=>!validDraft(drafts.get(m.id))))throw Error('Điền caption và chọn giờ trong tương lai hoặc Đăng ngay cho tất cả dòng đã chọn');
    const items=chosen.map(m=>{const d=drafts.get(m.id);if(d.mode!=='now' && (!d.due || Date.parse(d.due+':00+07:00')<=Date.now()))throw Error(`Chọn giờ trong tương lai cho ${m.name}`);return {mediaId:m.id,caption:d.caption,now:d.mode==='now',due:d.mode==='now'?undefined:new Date(d.due+':00+07:00').toISOString()};});
    saving=true;section.querySelectorAll('input,select,textarea,button').forEach(el=>el.disabled=true);
-   const result=await request('/api/jobs/batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pageId:get('page').value,items})});
-   toast(`Đã lưu ${result.count} lịch đăng`);saving=false;await reload();
+   const result=await request('/api/jobs/batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pageId:get('page').value,items,remote:true})});
+   localStorage.setItem('activeRemoteBatch',result.batchId);
+   toast(`Đã bắt đầu tải ${result.count} video lên Meta. Giữ app mở đến khi hiện thông báo có thể tắt.`);saving=false;await reload();
   }catch(error){toast(error.message);}finally{saving=false;section.querySelectorAll('input,select,textarea,button').forEach(el=>el.disabled=false);render();}
  };
  return data=>{
   if(saving)return;
+  remoteBusy=data.jobs.some(j=>['remote_queued','remote_uploading','remote_confirming'].includes(j.status));
   const page=get('page').value;get('page').innerHTML='<option value="">Chọn Page</option>'+data.pages.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');get('page').value=page;
   const next=[...data.media].sort((a,b)=>a.name.localeCompare(b.name,'vi',{numeric:true}) || a.id.localeCompare(b.id));
   for(const m of next)if(!drafts.has(m.id))drafts.set(m.id,{selected:false,caption:'',mode:'schedule',due:''});

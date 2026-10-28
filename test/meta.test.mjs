@@ -12,6 +12,21 @@ test('non JSON upload failures keep HTTP status without exposing response',async
  const meta=new Meta({version:'v99.0',fetcher:async()=>({ok:false,status:502,json:async()=>{throw Error('secret proxy response');}})});
  await assert.rejects(()=>meta.upload('https://rupload.facebook.com/upload','token',Buffer.from('video')),error=>error.message.includes('502') && !error.message.includes('secret'));
 });
+test('scheduled Reel sends Meta schedule state and Unix timestamp',async()=>{
+ let params;
+ const meta=new Meta({version:'v99.0',fetcher:async(url,options)=>{params=options.body;return {ok:true,json:async()=>({success:true})};}});
+ await meta.schedule('page','token','123','Caption','2099-01-01T01:00:00.000Z');
+ assert.equal(params.get('upload_phase'),'finish');
+ assert.equal(params.get('video_state'),'SCHEDULED');
+ assert.equal(params.get('scheduled_publish_time'),String(Date.parse('2099-01-01T01:00:00.000Z')/1000));
+ assert.equal(params.get('description'),'Caption');
+});
+test('stream upload reports byte progress without exposing token',async()=>{
+ const {Readable}=await import('node:stream');const seen=[];
+ const meta=new Meta({version:'v99.0',fetcher:async(url,options)=>{let total=0;for await(const chunk of options.body)total+=chunk.length;assert.equal(total,5);return {ok:true,json:async()=>({success:true})};}});
+ await meta.upload('https://rupload.facebook.com/upload','token',Readable.from([Buffer.from('ab'),Buffer.from('cde')]),5,(sent,size)=>seen.push([sent,size]));
+ assert.deepEqual(seen,[[2,5],[5,5]]);
+});
 test('Reels upload uses start, binary transfer and finish with caption',async()=>{const calls=[];const replies=[{video_id:'123',upload_url:'https://rupload.facebook.com/video-upload/123'},{success:true},{success:true}];const meta=new Meta({version:'v99.0',fetcher:async(url,options)=>{calls.push({url:String(url),options});return {ok:true,json:async()=>replies.shift()};}});const session=await meta.begin('page','secret');await meta.upload(session.upload_url,'secret',Buffer.from('video'));await meta.finish('page','secret',session.video_id,'Xin chào');assert.equal(calls.length,3);assert.equal(calls[0].options.body.get('upload_phase'),'start');assert.equal(calls[1].options.headers.file_size,'5');assert.equal(calls[2].options.body.get('description'),'Xin chào');assert.equal(calls[2].options.body.get('video_state'),'PUBLISHED');assert.ok(calls.every(c=>!c.url.includes('secret')));});
 test('rejects untrusted upload host without sending token',async()=>{const meta=new Meta({version:'v99.0',fetcher:()=>{throw Error('must not fetch');}});await assert.rejects(()=>meta.upload('https://example.com','secret',Buffer.from('x')),/không hợp lệ/);});
 test('Meta errors do not expose remote response or token',async()=>{const meta=new Meta({version:'v99.0',fetcher:async()=>({ok:false,status:400,json:async()=>({error:{code:190,message:'secret'}})})});await assert.rejects(()=>meta.begin('page','secret'),e=>e.message.includes('190')&&!e.message.includes('secret'));});
