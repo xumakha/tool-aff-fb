@@ -18,10 +18,10 @@ export class Meta {
     return pages;
   }
   async begin(page, token) { return this.request(`${page}/video_reels`, token, {upload_phase:'start'}); }
-  async upload(url, token, bytes) {
+  async upload(url, token, bytes, size = bytes.length) {
     const target = new URL(url);
     if (target.protocol !== 'https:' || !(target.hostname === 'rupload.facebook.com' || target.hostname.endsWith('.rupload.facebook.com'))) throw new Error('Địa chỉ upload Meta không hợp lệ');
-    const response = await this.fetch(target, {method:'POST', headers:{Authorization:`OAuth ${token}`, offset:'0', file_size:String(bytes.length),'Content-Type':'application/octet-stream'},body:bytes,signal:AbortSignal.timeout(600000)});
+    const response = await this.fetch(target, {method:'POST', headers:{Authorization:`OAuth ${token}`, offset:'0', file_size:String(size),'Content-Type':'application/octet-stream'},body:bytes,...(typeof bytes.pipe === 'function' ? {duplex:'half'} : {}),signal:AbortSignal.timeout(600000)});
     const result = await response.json();
     if (!response.ok || !result.success) throw new Error('Meta không chấp nhận video upload');
   }
