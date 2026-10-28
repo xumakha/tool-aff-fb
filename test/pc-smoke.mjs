@@ -1,7 +1,7 @@
 // Run explicitly: node test/pc-smoke.mjs (requires local listening permission).
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
-import {mkdtemp,writeFile,readdir,rm} from 'node:fs/promises';
+import {mkdtemp,writeFile,readdir,rm,realpath} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import assert from 'node:assert/strict';
@@ -17,7 +17,9 @@ let db;try{
  const added=await (await post('/api/folders/import',{path:folder})).json();assert.equal(added.added,1);
  const repeated=await (await post('/api/folders/import',{path:folder})).json();assert.equal(repeated.existing,1);assert.equal(repeated.added,0);
  assert.deepEqual((await readdir(join(temp,'data'))).filter(x=>!x.startsWith('reels.sqlite')),[]);
- const state=await (await fetch(base+'/api/state')).json();assert.equal(state.media[0].path,file);assert.equal(state.media.length,1);
+ const state=await (await fetch(base+'/api/state')).json();
+ // Windows TEMP may use an 8.3 alias (RUNNER~1); production stores realpath.
+ assert.equal(state.media[0].path,await realpath(file));assert.equal(state.media.length,1);
  db=new DatabaseSync(join(temp,'data','reels.sqlite'));db.prepare('INSERT INTO pages VALUES(?,?,?)').run('test-page','Test','no-real-token');
  const job={pageId:'test-page',mediaId:state.media[0].id,caption:'test',due:'2099-01-01T00:00:00Z'};assert.equal((await post('/api/jobs',job)).status,201);
  const id=db.prepare('SELECT id FROM jobs').get().id;assert.equal((await fetch(base+'/api/jobs/'+id,{method:'DELETE'})).status,200);
