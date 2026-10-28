@@ -51,14 +51,26 @@ Nếu Git yêu cầu đăng nhập, dùng tài khoản GitHub có quyền ghi re
 
 ## Chọn video và lên lịch
 
-1. Bấm **Chọn thư mục trên PC** để mở hộp thoại Windows. Hoặc nhập đường dẫn tuyệt đối, ví dụ `D:\Videos\Reels`, rồi bấm **Quét thư mục**.
-2. Tool nhập thông tin MP4/MOV ngay trong thư mục đó, không quét thư mục con. Có thể nhập nhiều thư mục lần lượt. Quét lại không tạo mục trùng cho file không thay đổi.
+1. Bấm **Chọn video trên PC** hoặc **Thêm video** trong bảng nhanh. Mở thư mục và giữ Ctrl/Shift để chọn các file MP4/MOV cần thêm, rồi bấm Open.
+2. Chỉ các file đã chọn được thêm vào thư viện (tối đa 1000 file/lần). Có thể thêm nhiều lần; file không thay đổi không bị tạo trùng. Hủy hộp thoại không thêm video nào.
 3. Kết nối Facebook, chọn Page, video, caption và giờ Việt Nam; lưu lịch hoặc đăng ngay.
 4. Đến giờ, worker đọc file gốc theo luồng và tải trực tiếp sang Meta; không giữ toàn bộ video trong RAM.
+
+Sau khi chọn file, **Thư viện video** hiển thị danh sách kèm khung hình xem trước, tên, dung lượng và đường dẫn. Video có codec không được trình duyệt hỗ trợ hoặc file không còn đọc được sẽ hiện “Không có ảnh xem trước”. Khi Meta xác nhận **Đã xuất bản**, video tự được bỏ khỏi thư viện và bảng nhanh, giữ nguyên file gốc và lịch sử. Video đang chờ, đang xử lý hoặc lỗi vẫn còn để kiểm tra. Chọn lại file đã bỏ sẽ đưa nó trở lại thư viện.
+
+Nút **Xóa khỏi thư viện** chỉ bỏ video khỏi danh sách, giữ nguyên file gốc và lịch sử đăng. Không cho xóa video có bài chờ, đang đăng/xử lý hoặc cần kiểm tra. Quét lại thư mục sẽ đưa video đã bỏ trở lại thư viện.
 
 **Máy phải bật, không sleep, có mạng và tool phải chạy khi đến lịch.** Nếu tool tắt hoặc PC sleep, bài quá hạn sẽ được xử lý khi tool chạy lại. Đóng tab trình duyệt không dừng worker; đóng cửa sổ terminal sẽ dừng. Ổ đĩa ngoài/ổ mạng phải được kết nối và đọc được bởi tài khoản chạy tool.
 
 Không di chuyển, đổi tên, xóa hoặc chỉnh sửa video đã lên lịch. Tool so sánh kích thước và thời gian sửa file trước khi đăng; nếu khác, bài chuyển sang cần kiểm tra. Quét lại thư mục để nhập phiên bản mới và tạo lịch mới. Đây là kiểm tra metadata, không phải hash toàn bộ video.
+
+### Lên lịch từng video hoặc toàn bộ thư viện
+
+**Lên lịch nhanh** hiển thị mỗi video một dòng có ảnh thu nhỏ, checkbox, caption và giờ riêng. Chọn Page, chọn các dòng (hoặc chọn tất cả), đặt giờ bắt đầu/khoảng cách rồi bấm **Chia giờ cho dòng đã chọn**. Có thể áp dụng caption chung hoặc lấy tên video làm caption, sau đó sửa riêng từng dòng và bấm **Lưu các dòng đã chọn** một lần. Dòng chọn **Đăng ngay** sẽ vào hàng chờ xử lý ngay khi lưu. Các dòng đã lưu được bỏ chọn để tránh bấm nhầm lần nữa. Bản nháp được giữ khi tự làm mới dữ liệu, nhưng không lưu qua việc đóng/tải lại cửa sổ.
+
+Trong **Tạo lịch đăng → Phạm vi lên lịch**, chọn **Từng video** để đặt Page, caption và giờ riêng; hoặc **Tất cả video trong thư viện** để đặt chung Page/caption, giờ bắt đầu và khoảng cách giữa các bài (phút). Chế độ tất cả xếp theo tên video, hiển thị giờ đầu–cuối và tạo tối đa 1000 lịch một lần. Ví dụ bắt đầu 09:00, cách 60 phút sẽ đăng lần lượt 09:00, 10:00, 11:00.
+
+Nếu có file thay đổi/mất hoặc video đã có bài chờ, đang xử lý hay cần kiểm tra trên Page đó, cả lượt tạo lịch sẽ bị từ chối. Xử lý lịch cũ hoặc chuyển sang từng video để chọn nội dung khác.
 
 ## Dữ liệu lưu ở đâu?
 

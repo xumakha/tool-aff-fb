@@ -33,16 +33,30 @@ export async function checkUnchanged(media) {
   if (current.size !== media.size || current.mtime !== media.mtime) throw new Error('Video gốc đã thay đổi. Hãy nhập lại thư mục và tạo lịch mới.');
   return current;
 }
-export async function pickFolder() {
+export async function selectVideos(paths) {
+  if(!Array.isArray(paths) || !paths.length || paths.length>1000)throw Error('Chọn từ 1 đến 1000 video');
+  const files=[];
+  for(const path of paths){
+    if(typeof path!=='string' || !isAbsolute(path))throw Error('Đường dẫn video phải là tuyệt đối');
+    files.push(await inspectVideo(path));
+  }
+  return {files,skipped:[],folder:null};
+}
+export async function pickFolder(files=false) {
   if (process.env.DESKTOP_MODE === '1' && process.send) {
     const id = crypto.randomUUID();
     return new Promise((resolve,reject)=>{
-      const finish=message=>{if(message.type==='picked-folder' && message.id===id){clearTimeout(timer);process.off('message',finish);resolve(message.path || '');}};
+      const finish=message=>{if(message.type==='picked-folder' && message.id===id){clearTimeout(timer);process.off('message',finish);resolve(files?(message.paths || []):(message.path || ''));}};
       const timer=setTimeout(()=>{process.off('message',finish);reject(new Error('Hết thời gian chọn thư mục'));},180000);
-      process.on('message',finish);process.send({type:'pick-folder',id});
+      process.on('message',finish);process.send({type:'pick-folder',id,files});
     });
   }
   if (process.platform === 'win32') {
+    if(files){
+      const script="Add-Type -AssemblyName System.Windows.Forms; $dialog = New-Object System.Windows.Forms.OpenFileDialog; $dialog.Title = 'Chon video'; $dialog.Filter = 'Video MP4/MOV|*.mp4;*.mov'; $dialog.Multiselect = $true; if ($dialog.ShowDialog() -eq 'OK') { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; [Console]::Write((ConvertTo-Json -InputObject @($dialog.FileNames) -Compress)) }";
+      const {stdout}=await exec('powershell.exe',['-NoProfile','-STA','-Command',script],{timeout:180000,maxBuffer:1024*1024,windowsHide:true});
+      return stdout.trim()?JSON.parse(stdout):[];
+    }
     const script = "Add-Type -AssemblyName System.Windows.Forms; $dialog = New-Object System.Windows.Forms.FolderBrowserDialog; $dialog.Description = 'Chon thu muc video'; if ($dialog.ShowDialog() -eq 'OK') { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; [Console]::Write($dialog.SelectedPath) }";
     const {stdout} = await exec('powershell.exe', ['-NoProfile', '-STA', '-Command', script], {timeout:120000, maxBuffer:65536, windowsHide:true});
     return stdout.trim();

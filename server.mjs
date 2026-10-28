@@ -4,14 +4,18 @@ import {DatabaseSync} from 'node:sqlite';
 import {mkdirSync,readFileSync,createReadStream} from 'node:fs';
 import {randomBytes,createCipheriv,createDecipheriv,timingSafeEqual} from 'node:crypto';
 import {Meta} from './meta.mjs';
-import {scanFolder, pickFolder, checkUnchanged} from './local-media.mjs';
+import {scanFolder, pickFolder, checkUnchanged, selectVideos} from './local-media.mjs';
 if (process.env.HOST && !['127.0.0.1','localhost','::1'].includes(process.env.HOST)) throw new Error('Bản PC chỉ lắng nghe localhost');
 const root = process.env.DATA_DIR || 'data'; mkdirSync(root,{recursive:true});
 const db = new DatabaseSync(`${root}/reels.sqlite`);
 db.exec(`PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS pages(id TEXT PRIMARY KEY,name TEXT,token TEXT); CREATE TABLE IF NOT EXISTS media(id TEXT PRIMARY KEY,name TEXT,size INTEGER); CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,page_id TEXT,media_id TEXT,caption TEXT,due TEXT,status TEXT DEFAULT 'queued',video_id TEXT,error TEXT,created TEXT);`);
 // Additive migration preserves existing uploads and scheduled jobs.
 const columns = db.prepare('PRAGMA table_info(media)').all().map(c=>c.name);
-for (const [name,type] of [['path','TEXT'],['mtime','REAL'],['folder','TEXT']]) if (!columns.includes(name)) db.exec(`ALTER TABLE media ADD COLUMN ${name} ${type}`);
+for (const [name,type] of [['path','TEXT'],['mtime','REAL'],['folder','TEXT'],['hidden','INTEGER DEFAULT 0']]) if (!columns.includes(name)) db.exec(`ALTER TABLE media ADD COLUMN ${name} ${type}`);
+// Keep history and source files; remove confirmed publications from the library.
+db.exec(`CREATE TRIGGER IF NOT EXISTS hide_published_media AFTER UPDATE OF status ON jobs
+ WHEN NEW.status='published' AND OLD.status!='published'
+ BEGIN UPDATE media SET hidden=1 WHERE id=NEW.media_id; END;`);
 // An interrupted publish must be reconciled, never blindly repeated.
 db.exec("UPDATE jobs SET status='review',error='Worker bị gián đoạn. Kiểm tra trên Facebook trước khi thử lại.' WHERE status='running'");
 const config = () => !!(process.env.META_APP_ID && process.env.META_APP_SECRET && /^v\d+\.\d+$/.test(process.env.META_GRAPH_VERSION || '') && /^[a-f0-9]{64}$/i.test(process.env.TOKEN_ENCRYPTION_KEY || ''));
@@ -33,7 +37,7 @@ const server=http.createServer(async(req,res)=>{try{
  if(req.method!=='GET' && req.headers['sec-fetch-site']==='cross-site')return json(res,403,{error:'Yêu cầu từ website khác bị chặn'});
  const allowedOrigins=new Set([new URL(base).origin]);if(process.env.DESKTOP_MODE==='1'){allowedOrigins.add(`http://localhost:${process.env.PORT}`);allowedOrigins.add(`http://127.0.0.1:${process.env.PORT}`);}
  if(req.method!=='GET' && req.headers.origin && !allowedOrigins.has(req.headers.origin))return json(res,403,{error:'Origin không hợp lệ'});
- if(req.method==='GET' && url.pathname==='/api/state')return json(res,200,{configured:config(),pages:db.prepare('SELECT id,name FROM pages').all(),media:db.prepare('SELECT * FROM media').all(),jobs:db.prepare('SELECT jobs.*,pages.name AS page_name,media.name AS media_name FROM jobs LEFT JOIN pages ON pages.id=jobs.page_id LEFT JOIN media ON media.id=jobs.media_id ORDER BY due DESC').all()});
+ if(req.method==='GET' && url.pathname==='/api/state')return json(res,200,{configured:config(),pages:db.prepare('SELECT id,name FROM pages').all(),media:db.prepare('SELECT * FROM media WHERE COALESCE(hidden,0)=0').all(),jobs:db.prepare('SELECT jobs.*,pages.name AS page_name,media.name AS media_name FROM jobs LEFT JOIN pages ON pages.id=jobs.page_id LEFT JOIN media ON media.id=jobs.media_id ORDER BY due DESC').all()});
  if(url.pathname==='/auth/meta' && req.method==='GET'){
   if(!config())return json(res,400,{error:'Cần cấu hình Meta App, phiên bản API và khóa mã hóa trong .env'});
   const state=randomBytes(32).toString('hex');states.set(state,Date.now()+600000);for(const [k,v] of states)if(v<Date.now())states.delete(k);
@@ -50,22 +54,80 @@ const server=http.createServer(async(req,res)=>{try{
   res.writeHead(302,{Location:'/', 'Set-Cookie':'meta_state=; HttpOnly; SameSite=Lax; Path=/auth; Max-Age=0'});return res.end();
  }
  if(url.pathname==='/api/folders/pick' && req.method==='POST')return json(res,200,{path:await pickFolder()});
- if(url.pathname==='/api/folders/import' && req.method==='POST'){
-  const input=JSON.parse(await body(req));const scanned=await scanFolder(input.path);let added=0,existing=0;
+ if(url.pathname==='/api/videos/pick' && req.method==='POST')return json(res,200,{paths:await pickFolder(true)});
+ if(['/api/folders/import','/api/videos/import'].includes(url.pathname) && req.method==='POST'){
+  const input=JSON.parse(await body(req));const scanned=url.pathname==='/api/videos/import'?await selectVideos(input.paths):await scanFolder(input.path);let added=0,existing=0;
   db.exec('BEGIN');
   try {
    for(const file of scanned.files){
     // Keep previous file versions for old jobs; never silently substitute changed content.
     const duplicate=db.prepare('SELECT id FROM media WHERE path=? AND size=? AND mtime=?').get(file.path,file.size,file.mtime);
-    if(duplicate){existing++;continue;}
+    if(duplicate){db.prepare('UPDATE media SET hidden=0 WHERE id=?').run(duplicate.id);existing++;continue;}
     db.prepare('INSERT INTO media(id,name,size,path,mtime,folder) VALUES(?,?,?,?,?,?)').run(randomBytes(16).toString('hex'),file.name,file.size,file.path,file.mtime,scanned.folder);added++;
    }
    db.exec('COMMIT');
   }catch(error){db.exec('ROLLBACK');throw error;}
   return json(res,200,{added,existing,skipped:scanned.skipped,folder:scanned.folder});
  }
+ const mediaRoute=url.pathname.match(/^\/api\/media\/([a-f0-9]{32})(\/preview)?$/);
+ if(mediaRoute){
+  const media=db.prepare('SELECT * FROM media WHERE id=? AND COALESCE(hidden,0)=0').get(mediaRoute[1]);
+  if(!media)return json(res,404,{error:'Video không còn trong thư viện'});
+  if(req.method==='DELETE' && !mediaRoute[2]){
+   if(db.prepare("SELECT id FROM jobs WHERE media_id=? AND status IN ('queued','running','processing','review')").get(media.id))return json(res,409,{error:'Video đang có lịch đăng hoặc bài cần kiểm tra. Hủy lịch chờ và xử lý bài đang đăng trước khi xóa.'});
+   db.prepare('UPDATE media SET hidden=1 WHERE id=?').run(media.id);
+   return json(res,200,{ok:true});
+  }
+  if(req.method==='GET' && mediaRoute[2]){
+   if(media.path)await checkUnchanged(media);
+   let start=0,end=media.size-1;
+   if(req.headers.range){
+    const range=/^bytes=(\d*)-(\d*)$/.exec(req.headers.range);
+    if(!range || (!range[1] && !range[2])){res.writeHead(416,{'Content-Range':`bytes */${media.size}`});return res.end();}
+    start=range[1]?Number(range[1]):Math.max(0,media.size-Number(range[2]));
+    end=range[1] && range[2]?Math.min(Number(range[2]),end):end;
+    if(!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start>end || start>=media.size){res.writeHead(416,{'Content-Range':`bytes */${media.size}`});return res.end();}
+   }
+   const stream=createReadStream(media.path || `${root}/${media.id}`,{start,end});
+   stream.on('error',()=>{if(!res.headersSent)json(res,404,{error:'Không đọc được video'});else res.destroy();});
+   stream.once('open',()=>{
+    res.writeHead(req.headers.range?206:200,{'Content-Type':'video/mp4','Accept-Ranges':'bytes','Content-Length':end-start+1,'Cache-Control':'no-store',...(req.headers.range?{'Content-Range':`bytes ${start}-${end}/${media.size}`}:{})});stream.pipe(res);
+   });
+   res.on('close',()=>stream.destroy());return;
+  }
+ }
+ if(url.pathname==='/api/jobs/batch' && req.method==='POST'){
+  const input=JSON.parse(await body(req));
+  if(!db.prepare('SELECT id FROM pages WHERE id=?').get(input.pageId || ''))throw Error('Chọn Page đã kết nối');
+  const custom=Array.isArray(input.items);
+  if(custom)input.mediaIds=input.items.map(item=>item?.mediaId);
+  if(!Array.isArray(input.mediaIds) || !input.mediaIds.length || input.mediaIds.length>1000 || input.mediaIds.some(id=>typeof id!=='string') || new Set(input.mediaIds).size!==input.mediaIds.length)throw Error('Chọn từ 1 đến 1000 video khác nhau');
+  const start=new Date(input.due).getTime(),interval=input.intervalMinutes;
+  if(!custom && (!Number.isFinite(start) || start<=Date.now() || !Number.isInteger(interval) || interval<1 || interval>525600 || typeof input.caption!=='string' || input.caption.length>2200))throw Error('Chọn giờ bắt đầu trong tương lai, khoảng cách 1–525600 phút và caption tối đa 2200 ký tự');
+  const items=custom?input.items:input.mediaIds.map((mediaId,index)=>({mediaId,caption:input.caption,due:new Date(start+index*interval*60000).toISOString()}));
+  const now=Date.now();
+  for(const item of items){
+   if(typeof item.caption!=='string' || item.caption.length>2200 || (!item.now && (!Number.isFinite(Date.parse(item.due)) || Date.parse(item.due)<=now)) || (item.now!==undefined && typeof item.now!=='boolean'))throw Error('Mỗi video cần caption tối đa 2200 ký tự và giờ đăng trong tương lai hoặc chọn Đăng ngay');
+   item.due=item.now?new Date(now).toISOString():new Date(item.due).toISOString();
+  }
+  for(const id of input.mediaIds){
+   const media=db.prepare('SELECT * FROM media WHERE id=? AND COALESCE(hidden,0)=0').get(id);
+   if(!media)throw Error('Video đã bị xóa khỏi thư viện. Hãy làm mới danh sách.');
+   if(media.path)await checkUnchanged(media);
+  }
+  db.exec('BEGIN');
+  try{
+   for(const [index,id] of input.mediaIds.entries()){
+    if(!db.prepare('SELECT id FROM media WHERE id=? AND COALESCE(hidden,0)=0').get(id))throw Error('Thư viện đã thay đổi. Hãy làm mới danh sách.');
+    if(db.prepare("SELECT id FROM jobs WHERE page_id=? AND media_id=? AND status IN ('queued','running','processing','review')").get(input.pageId,id))throw Error('Có video đã có lịch hoặc bài cần kiểm tra trên Page này. Chưa tạo lịch nào; hãy xử lý lịch cũ hoặc chọn từng video.');
+    db.prepare('INSERT INTO jobs(id,page_id,media_id,caption,due,created) VALUES(?,?,?,?,?,?)').run(randomBytes(16).toString('hex'),input.pageId,id,items[index].caption,items[index].due,new Date().toISOString());
+   }
+   db.exec('COMMIT');
+  }catch(error){db.exec('ROLLBACK');throw error;}
+  return json(res,201,{ok:true,count:input.mediaIds.length});
+ }
  if(url.pathname==='/api/jobs' && req.method==='POST'){
-  const input=JSON.parse(await body(req));if(!db.prepare('SELECT id FROM pages WHERE id=?').get(input.pageId || '') || !db.prepare('SELECT id FROM media WHERE id=?').get(input.mediaId || ''))throw new Error('Chọn Page đã kết nối và video');
+  const input=JSON.parse(await body(req));if(!db.prepare('SELECT id FROM pages WHERE id=?').get(input.pageId || '') || !db.prepare('SELECT id FROM media WHERE id=? AND COALESCE(hidden,0)=0').get(input.mediaId || ''))throw new Error('Chọn Page đã kết nối và video');
   const selected=db.prepare('SELECT * FROM media WHERE id=?').get(input.mediaId);if(selected.path)await checkUnchanged(selected);
   const due=new Date(input.due || Date.now());if(!Number.isFinite(due.getTime()) || typeof input.caption!=='string' || input.caption.length>2200)throw new Error('Lịch đăng hoặc caption không hợp lệ');
   db.prepare('INSERT INTO jobs(id,page_id,media_id,caption,due,created) VALUES(?,?,?,?,?,?)').run(randomBytes(16).toString('hex'),input.pageId,input.mediaId,input.caption,due.toISOString(),new Date().toISOString());return json(res,201,{ok:true});
@@ -73,7 +135,7 @@ const server=http.createServer(async(req,res)=>{try{
  if(url.pathname.startsWith('/api/jobs/') && req.method==='DELETE'){
   const result=db.prepare("UPDATE jobs SET status='cancelled' WHERE id=? AND status='queued'").run(url.pathname.split('/').pop());return json(res,result.changes?200:409,{ok:!!result.changes});
  }
- if(req.method==='GET' && ['/', '/app.js','/style.css'].includes(url.pathname)){const file=url.pathname==='/'?'index.html':url.pathname.slice(1);res.writeHead(200,{'Content-Type':file.endsWith('.html')?'text/html; charset=utf-8':file.endsWith('.js')?'text/javascript':'text/css','Content-Security-Policy':"default-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",'X-Content-Type-Options':'nosniff'});return res.end(readFileSync(fileURLToPath(new URL(`./public/${file}`,import.meta.url))));}
+ if(req.method==='GET' && ['/', '/app.js','/quick.js','/style.css'].includes(url.pathname)){const file=url.pathname==='/'?'index.html':url.pathname.slice(1);res.writeHead(200,{'Content-Type':file.endsWith('.html')?'text/html; charset=utf-8':file.endsWith('.js')?'text/javascript':'text/css','Content-Security-Policy':"default-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",'X-Content-Type-Options':'nosniff'});return res.end(readFileSync(fileURLToPath(new URL(`./public/${file}`,import.meta.url))));}
  json(res,404,{error:'Không tìm thấy'});
  }catch(error){json(res,400,{error:error.message});}});
 let busy=false;
