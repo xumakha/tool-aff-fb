@@ -1,6 +1,6 @@
 {
   "name": "reels-desk",
-  "version": "0.3.0",
+  "version": "0.3.2",
   "private": true,
   "type": "module",
   "engines": {
@@ -9,6 +9,7 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env server.mjs",
     "test": "node --test test/*.test.mjs",
+    "test:shopee:electron": "electron test/shopee-electron-fetch.cjs",
     "desktop": "electron .",
     "build:win": "electron-builder --win nsis portable --x64",
     "build:dir": "electron-builder --dir"
