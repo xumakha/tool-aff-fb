@@ -4,7 +4,11 @@ const labels={queued:'Chờ đăng',running:'Đang upload',processing:'Meta đan
 const esc=value=>String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function toast(message){$('toast').textContent=message;$('toast').hidden=false;setTimeout(()=>$('toast').hidden=true,6500);}
 async function request(path,options){const res=await fetch(path,options);const result=await res.json();if(!res.ok)throw new Error(result.error || 'Yêu cầu thất bại');if(result.archiveWarnings?.length)alert(result.archiveWarnings.join('\n'));return result;}
-document.querySelector('.schedule').insertAdjacentHTML('beforebegin','<section id="upload-progress" class="card" hidden><div class="card-title"><h2>Tiến độ tải lên Meta</h2><span id="upload-total"></span></div><div id="upload-items"></div><p id="upload-message" role="status"></p></section>');
+document.querySelector('.schedule').insertAdjacentHTML('beforebegin','<section id="upload-progress" class="card" hidden><div class="card-title"><h2>Tiến độ tải lên Meta</h2><span id="upload-total"></span><button type="button" id="upload-toggle" class="secondary" aria-expanded="true" aria-controls="upload-details">Thu gọn</button></div><div id="upload-details"><div id="upload-items"></div><p id="upload-message" role="status"></p></div></section>');
+$('upload-toggle').onclick=()=>{
+ const details=$('upload-details'),button=$('upload-toggle');details.hidden=!details.hidden;
+ button.setAttribute('aria-expanded',String(!details.hidden));button.textContent=details.hidden?'Mở rộng':'Thu gọn';
+};
 function renderProgress(jobs){
  const batchId=localStorage.getItem('activeRemoteBatch'),panel=$('upload-progress');
  const items=batchId?jobs.filter(j=>j.batch_id===batchId):[];panel.hidden=!items.length;if(!items.length)return;
@@ -62,9 +66,9 @@ pagesDetails.append(pagesSummary,pagesContent);pagesCard.append(pagesDetails);
 const updateQuick=createQuickScheduler({request,toast,reload:load});
 $('refresh').insertAdjacentHTML('beforebegin','<button type="button" class="secondary" id="clear-history">Clear lịch sử</button>');
 $('clear-history').onclick=async()=>{
- if(!confirm('Xóa lịch sử đã xuất bản và đã hủy trong tool? Giữ các lịch đang chờ, đang xử lý và cần kiểm tra. File gốc và bài trên Facebook không bị xóa.'))return;
+ if(!confirm('Dọn khỏi danh sách các dòng đã xuất bản, đã hủy và Meta đã nhận lịch? Lịch trên Facebook vẫn tiếp tục chạy. Tool giữ dữ liệu chống đăng trùng; các dòng đang chờ, đang xử lý và cần kiểm tra vẫn hiển thị.'))return;
  const button=$('clear-history');button.disabled=true;
- try{const result=await request('/api/jobs/history',{method:'DELETE'});await load();toast(`Đã xóa ${result.count} dòng lịch sử`);}
+ try{const result=await request('/api/jobs/history',{method:'DELETE'});await load();toast(result.count?`Đã dọn ${result.count} dòng khỏi lịch sử hiển thị`:'Không có lịch sử đã hoàn tất để dọn. Các lịch đang chờ, đang xử lý hoặc cần kiểm tra được giữ lại.');}
  catch(error){toast(error.message);}finally{button.disabled=false;}
 };
 $('refresh').onclick=load;load();setInterval(load,15000);
@@ -73,7 +77,7 @@ $('media-list').onclick=async event=>{const button=event.target.closest('.remove
 
 $('compose').insertAdjacentHTML('beforeend',`<form id="shopee-form"><h3>Tải video shop Shopee</h3><label for="shopee-url">Link shop</label><input id="shopee-url" type="url" required placeholder="https://shopee.vn/ipone_vietnam"><button id="shopee-start">Tải video của shop</button><p>Desktop Electron: chọn nơi lưu video và file Excel (.xlsx), đăng nhập Shopee nếu cần. Đóng cửa sổ Shopee để dừng. Video tải thành công tự vào thư viện.</p></form><p id="shopee-status" role="status"></p><details><summary>Lỗi tải Shopee</summary><pre id="shopee-errors"></pre></details>`);
 $('shopee-status').insertAdjacentHTML('afterend','<details><summary>Sản phẩm bỏ qua (tối đa 500 gần nhất)</summary><pre id="shopee-skipped"></pre></details>');
-async function shopeeStatus(){try{const s=await request('/api/shopee');$('shopee-start').disabled=s.running;$('shopee-status').textContent=s.message+(s.folder?' · '+s.folder:'')+(s.excelPath?' · Excel: '+s.excelPath:'');$('shopee-errors').textContent=(s.errors||[]).map(e=>e.url+' : '+e.error).join('\n');$('shopee-skipped').textContent=(s.skipped||[]).map(e=>e.url+' : '+e.reason).join('\n')||'Chưa có sản phẩm bị bỏ qua trong lượt này.';}catch(e){$('shopee-status').textContent=e.message;}}
+async function shopeeStatus(){try{const s=await request('/api/shopee');$('shopee-start').disabled=s.running;$('shopee-status').textContent=s.message+(s.folder?' · '+s.folder:'')+(s.excelPath?' · Excel: '+s.excelPath:'');if(s.affiliateExcelPath)$('shopee-status').textContent+=' | Shopee Affiliate: '+s.affiliateExcelPath;$('shopee-errors').textContent=(s.errors||[]).map(e=>e.url+' : '+e.error).join('\n');$('shopee-skipped').textContent=(s.skipped||[]).map(e=>e.url+' : '+e.reason).join('\n')||'Chưa có sản phẩm bị bỏ qua trong lượt này.';}catch(e){$('shopee-status').textContent=e.message;}}
 $('shopee-form').onsubmit=async e=>{e.preventDefault();$('shopee-start').disabled=true;try{await request('/api/shopee',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:$('shopee-url').value})});}catch(e){toast(e.message);}await shopeeStatus();};
 shopeeStatus();setInterval(shopeeStatus,3000);
 
@@ -81,7 +85,7 @@ $('compose').insertAdjacentHTML('afterend',`<section class="card" id="affiliate"
 const affiliateFiles={};let affiliateMasterPath='';let affiliateSaving=false;
 let automaticSourceCount=0,automaticSourcesBusy=false;
 $('affiliate').querySelector('h2').nextElementSibling.textContent='Video Shopee tự lưu link gốc và tên sản phẩm. Chỉ cần tải file chứa link gốc + affiliate lên; app tự ghép khi nhận diện được các cột.';
-$('shopee-form').querySelector('p').textContent='Chọn thư mục lưu video. Excel được tạo tự động cạnh video; dữ liệu sản phẩm tự nhập vào tool. Đăng nhập Shopee nếu được yêu cầu.';
+$('shopee-form').querySelector('p').textContent='Chọn thư mục lưu video. Mỗi lượt tự tạo thư mục Excel Shopee chứa Ten va Link SP.xlsx (link + tên) và Shopee Affiliate.xlsx (mẫu 6 cột để upload Shopee). Dữ liệu sản phẩm tự nhập vào tool.';
 $('affiliate-video').insertAdjacentHTML('beforebegin','<p id="affiliate-auto-source" role="status"></p><label><input type="checkbox" id="affiliate-manual-source"> Dùng Excel video cũ thay cho dữ liệu tự lưu</label>');
 $('affiliate-video').hidden=true;
 $('affiliate-manual-source').onchange=()=>{$('affiliate-video').hidden=!$('affiliate-manual-source').checked;affiliateReady();};
@@ -111,6 +115,8 @@ for(const kind of ['video','mapping']){
 async function showAffiliateMaster(result){affiliateMasterPath=result.path||'';$('affiliate-master-path').textContent=affiliateMasterPath||'Chưa chọn file tổng hợp';affiliateReady();}
 request('/api/affiliate/master').then(showAffiliateMaster).catch(e=>{$('affiliate-master-path').textContent=e.message;});
 $('affiliate-master-pick').onclick=()=>{window.location.href='/api/affiliate/master/download';};
+$('affiliate-master-pick').insertAdjacentHTML('afterend',' <button type="button" id="affiliate-master-location" class="secondary">Mở thư mục file tổng</button>');
+$('affiliate-master-location').onclick=async()=>{const button=$('affiliate-master-location');button.disabled=true;try{await request('/api/affiliate/master/location',{method:'POST'});}catch(e){$('affiliate-result').textContent=e.message;}finally{button.disabled=false;}};
 $('affiliate-merge').onclick=async()=>{if(affiliateSaving)return;affiliateSaving=true;for(const el of $('affiliate').querySelectorAll('input,select'))el.disabled=true;affiliateReady();$('affiliate-master-pick').disabled=true;$('affiliate-result').textContent='Đang ghép và ghi vào file tổng hợp…';try{const result=await request('/api/affiliate/merge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...($('affiliate-manual-source').checked?{video:affiliateSelection('video')}:{}),mapping:affiliateSelection('mapping')})});const s=result.stats;$('affiliate-result').textContent=`Đã thêm ${result.added} dòng vào ${result.path} · Bỏ qua ${result.duplicates} dòng đã có · ${s.unmatched} chưa có aff · ${s.conflicts} nhiều aff khác nhau · ${s.invalid} dòng video không hợp lệ · ${s.invalidMapping} dòng đối chiếu không hợp lệ. Các dòng chưa ghép được chưa đưa vào tổng hợp.`;}catch(e){$('affiliate-result').textContent=e.message;}finally{affiliateSaving=false;for(const el of $('affiliate').querySelectorAll('input,select'))el.disabled=false;$('affiliate-master-pick').disabled=false;affiliateReady();}};
 
 $('library').insertAdjacentHTML('beforeend',`<details id="duplicates-panel"><summary>Xóa video trùng trên máy</summary><p>Quét thư mục và các thư mục con để tìm video có đuôi (1), (2)… Chỉ xóa bản có nội dung giống hệt bản giữ lại. Video có lịch đăng hoặc lịch sử đăng được giữ nguyên. Thao tác xóa file thật trên ổ đĩa.</p><button type="button" id="duplicates-pick" class="secondary">Chọn thư mục</button><input id="duplicates-folder" placeholder="Đường dẫn thư mục tuyệt đối" aria-label="Thư mục tìm video trùng"><button type="button" id="duplicates-scan">Tìm video trùng</button><p id="duplicates-status" role="status"></p><div id="duplicates-list"></div><button type="button" id="duplicates-delete" hidden>Xóa các bản trùng đã chọn</button></details>`);

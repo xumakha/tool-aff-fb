@@ -2,6 +2,11 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import helpers from '../desktop/shopee-url.cjs';
 const {shopURL,filename,videoURL}=helpers;
+test('shop folders combine readable shop name and clean URL without tracking query',()=>{
+ assert.equal(helpers.shopFolderName('Kim khí A&T','https://shopee.vn/kim-khi-a&t?tracking=123'),'kim-khi-a&t-shopee.vn-kim-khi-a&t');
+ assert.equal(helpers.shopFolderName('','https://shopee.vn/my_shop/'),'my_shop-shopee.vn-my_shop');
+ assert.ok(!/[<>:"/\\|?*]/.test(helpers.shopFolderName('A: B / C','https://shopee.vn/shop')));
+});
 test('shop URLs restricted to Shopee HTTPS shop pages',()=>{
  assert.equal(shopURL('https://shopee.vn/ipone_vietnam?categoryId=100636'),'https://shopee.vn/ipone_vietnam?categoryId=100636');
  for(const u of ['http://shopee.vn/shop','https://evil.test/shop','https://shopee.vn@evil.test/shop','https://shopee.vn/product/1/2','https://shopee.vn:444/shop'])assert.throws(()=>shopURL(u));

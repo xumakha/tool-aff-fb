@@ -14,6 +14,17 @@ test('navigation permits HTTPS Shopee login only and handles modern and legacy e
  for(const u of ['https://shopee.vn.evil.test/login','javascript:alert(1)','http://shopee.vn/login','https://user@shopee.vn/login'])assert.equal(browser.allowedNavigation(u),false);
  const f=fixture();let blocked=0;f.wc.emit('will-navigate',{url:'https://shopee.vn/buyer/login',preventDefault:()=>blocked++});f.wc.emit('will-redirect',{preventDefault:()=>blocked++},'https://evil.test');assert.equal(blocked,1);
 });
+test('stalled loads and aborted navigation leaving a blank window report errors',async()=>{
+ const stalled=fixture({loadTimeout:10});stalled.win.loadURL=()=>new Promise(()=>{});
+ await assert.rejects(stalled.controller.load('https://shopee.vn/shop'),/không tải xong/);
+ const blank=fixture();blank.setURL('about:blank');blank.win.loadURL=async()=>{throw Object.assign(Error('aborted'),{code:'ERR_ABORTED'});};
+ await assert.rejects(blank.controller.load('https://shopee.vn/shop'),/cửa sổ vẫn trống/);
+});
+test('closing a blank window immediately cancels its pending load',async()=>{
+ const f=fixture();f.win.loadURL=()=>new Promise(()=>{});
+ const result=f.controller.load('https://shopee.vn/shop');f.destroy();f.wc.emit('destroyed');
+ await assert.rejects(result,/Đã dừng quét/);assert.equal(f.wc.listenerCount('destroyed'),0);
+});
 test('scanner waits for login and resumes without executing on authentication page',async()=>{
  let f,waited=0;f=fixture({sleep:async()=>{waited++;f.setURL('https://shopee.vn/shop');}});f.setURL('https://shopee.vn/buyer/login');
  assert.deepEqual(await f.controller.execute('cards'),['product']);assert.equal(waited,1);

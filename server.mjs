@@ -22,9 +22,13 @@ db.exec(`PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS pages(id TEXT PRIMA
 // Additive migration preserves existing uploads and scheduled jobs.
 const columns = db.prepare('PRAGMA table_info(media)').all().map(c=>c.name);
 for (const [name,type] of [['path','TEXT'],['mtime','REAL'],['folder','TEXT'],['hidden','INTEGER DEFAULT 0']]) if (!columns.includes(name)) db.exec(`ALTER TABLE media ADD COLUMN ${name} ${type}`);
+// Each app session starts with an empty selection; retain files and job references.
+db.exec('UPDATE media SET hidden=1 WHERE COALESCE(hidden,0)=0');
 const jobColumns=db.prepare('PRAGMA table_info(jobs)').all().map(c=>c.name);
 if(!columns.includes('affiliate_caption'))db.exec("ALTER TABLE media ADD COLUMN affiliate_caption TEXT DEFAULT ''");
-for(const [name,type] of [['batch_id','TEXT'],['progress','INTEGER DEFAULT 0'],['remote_now','INTEGER DEFAULT 0']])if(!jobColumns.includes(name))db.exec(`ALTER TABLE jobs ADD COLUMN ${name} ${type}`);
+for(const [name,type] of [['batch_id','TEXT'],['progress','INTEGER DEFAULT 0'],['remote_now','INTEGER DEFAULT 0'],['history_hidden','INTEGER DEFAULT 0']])if(!jobColumns.includes(name))db.exec(`ALTER TABLE jobs ADD COLUMN ${name} ${type}`);
+// Start with a clean history/progress view, without deleting work or duplicate guards.
+db.exec('UPDATE jobs SET history_hidden=1 WHERE COALESCE(history_hidden,0)=0');
 // Hide scheduled media atomically with job creation, preserving source and history.
 db.exec(`CREATE TRIGGER IF NOT EXISTS hide_scheduled_media AFTER INSERT ON jobs
  BEGIN UPDATE media SET hidden=1 WHERE id=NEW.media_id; END;`);
@@ -51,7 +55,7 @@ process.on('message',async message=>{
  if(message.type==='shopee-state')shopeeState=message.state;
  if(message.type==='shopee-file'){shopeeImports++;try{
   const {files}=await selectVideos([message.path]);for(const file of files){
-   if(message.url)db.prepare('INSERT INTO shopee_sources(path,url,name) VALUES(?,?,?) ON CONFLICT(path) DO UPDATE SET url=excluded.url,name=excluded.name').run(file.path,message.url,file.name);
+   if(message.url)db.prepare('INSERT INTO shopee_sources(path,url,name) VALUES(?,?,?) ON CONFLICT(path) DO UPDATE SET url=excluded.url,name=excluded.name').run(file.path,message.url,typeof message.productName==='string'&&message.productName.trim()?message.productName.trim():file.name.replace(/\.mp4$/i,''));
    if(db.prepare('SELECT id FROM media WHERE path=? AND size=? AND mtime=?').get(file.path,file.size,file.mtime))continue;
    if(message.reused)continue;
    db.prepare('INSERT INTO media(id,name,size,path,mtime,folder) VALUES(?,?,?,?,?,?)').run(randomBytes(16).toString('hex'),file.name,file.size,file.path,file.mtime,null);
@@ -70,7 +74,7 @@ const server=http.createServer(async(req,res)=>{try{
  if(req.method!=='GET' && req.headers['sec-fetch-site']==='cross-site')return json(res,403,{error:'Yêu cầu từ website khác bị chặn'});
  const allowedOrigins=new Set([new URL(base).origin]);if(process.env.DESKTOP_MODE==='1'){allowedOrigins.add(`http://localhost:${process.env.PORT}`);allowedOrigins.add(`http://127.0.0.1:${process.env.PORT}`);}
  if(req.method!=='GET' && req.headers.origin && !allowedOrigins.has(req.headers.origin))return json(res,403,{error:'Origin không hợp lệ'});
- if(req.method==='GET' && url.pathname==='/api/state')return json(res,200,{configured:config(),pages:db.prepare('SELECT id,name FROM pages').all(),media:db.prepare('SELECT * FROM media WHERE COALESCE(hidden,0)=0').all(),jobs:db.prepare('SELECT jobs.*,pages.name AS page_name,media.name AS media_name FROM jobs LEFT JOIN pages ON pages.id=jobs.page_id LEFT JOIN media ON media.id=jobs.media_id ORDER BY due DESC').all()});
+ if(req.method==='GET' && url.pathname==='/api/state')return json(res,200,{configured:config(),pages:db.prepare('SELECT id,name FROM pages').all(),media:db.prepare('SELECT * FROM media WHERE COALESCE(hidden,0)=0').all(),jobs:db.prepare('SELECT jobs.*,pages.name AS page_name,media.name AS media_name FROM jobs LEFT JOIN pages ON pages.id=jobs.page_id LEFT JOIN media ON media.id=jobs.media_id WHERE COALESCE(jobs.history_hidden,0)=0 ORDER BY due DESC').all()});
  if(url.pathname==='/auth/meta' && req.method==='GET'){
   if(!config())return json(res,400,{error:'Cần cấu hình Meta App, phiên bản API và khóa mã hóa trong .env'});
   const state=randomBytes(32).toString('hex');states.set(state,Date.now()+600000);for(const [k,v] of states)if(v<Date.now())states.delete(k);
@@ -87,6 +91,16 @@ const server=http.createServer(async(req,res)=>{try{
   res.writeHead(302,{Location:'/', 'Set-Cookie':'meta_state=; HttpOnly; SameSite=Lax; Path=/auth; Max-Age=0'});return res.end();
  }
  if(url.pathname==='/api/affiliate/master' && req.method==='GET')return json(res,200,{path:await masterPath()});
+ if(url.pathname==='/api/affiliate/master/location' && req.method==='POST'){
+  const file=await masterPath();
+  if(process.env.DESKTOP_MODE==='1'&&process.connected){
+   await new Promise((resolve,reject)=>process.send({type:'reveal-affiliate-master',path:file},error=>error?reject(error):resolve()));
+  }else if(process.platform==='win32'){
+   const {spawn}=await import('node:child_process');
+   await new Promise((resolve,reject)=>{const child=spawn('explorer.exe',['/select,',file],{stdio:'ignore',windowsHide:true});child.once('error',reject);child.once('spawn',()=>{child.unref();resolve();});});
+  }else throw Error('Mở vị trí file được hỗ trợ trên bản desktop hoặc Windows.');
+  return json(res,200,{path:file});
+ }
  if(url.pathname==='/api/affiliate/sources' && req.method==='GET')return json(res,200,{count:db.prepare('SELECT COUNT(*) AS count FROM shopee_sources').get().count,running:shopeeState.running||shopeeImports>0});
  if(url.pathname==='/api/affiliate/master/download' && req.method==='GET'){
   const file=await masterPath();const bytes=await (await import('node:fs/promises')).readFile(file);
@@ -221,7 +235,7 @@ const server=http.createServer(async(req,res)=>{try{
   return json(res,result.changes?200:409,{ok:!!result.changes,error:result.changes?undefined:'Trạng thái bài đã thay đổi; hãy làm mới danh sách'});
  }
  if(url.pathname==='/api/jobs/history' && req.method==='DELETE'){
-  const result=db.prepare("DELETE FROM jobs WHERE status IN ('published','cancelled')").run();
+  const result=db.prepare("UPDATE jobs SET history_hidden=1 WHERE status IN ('published','cancelled','remote_scheduled') AND COALESCE(history_hidden,0)=0").run();
   return json(res,200,{ok:true,count:result.changes});
  }
  if(url.pathname.startsWith('/api/jobs/') && req.method==='DELETE'){

@@ -6,7 +6,7 @@ import {join} from 'node:path';
 import helpers from '../desktop/shopee-downloads.cjs';
 const {productIdentity,collectProducts,loadHistory,saveHistory,existingDownload}=helpers;
 test('same product with slug, tracking, leading zeros or canonical URL is scanned once',()=>{
- const products=new Map();collectProducts(products,[{url:'https://shopee.vn/ao-do-i.01.002?from=shop',marked:true},{url:'https://shopee.vn/product/1/2',marked:false},{url:'https://shopee.vn/ao-moi-i.1.2?x=3',marked:false}]);assert.equal(products.size,1);assert.deepEqual([...products.values()],[{id:'1:2',url:'https://shopee.vn/product/1/2',marked:true}]);collectProducts(products,[{url:'https://shopee.vn/product/1/3',marked:false}]);assert.equal(products.size,2);
+ const products=new Map();collectProducts(products,[{url:'https://shopee.vn/ao-do-i.01.002?from=shop',marked:true},{url:'https://shopee.vn/product/1/2',marked:false},{url:'https://shopee.vn/ao-moi-i.1.2?x=3',marked:false}]);assert.equal(products.size,1);assert.deepEqual([...products.values()],[{id:'1:2',url:'https://shopee.vn/product/1/2',marked:true,xtra:false}]);collectProducts(products,[{url:'https://shopee.vn/product/1/3',marked:false}]);assert.equal(products.size,2);
  for(const url of ['https://evil.test/product/1/2','https://shopee.vn/shop','https://shopee.vn/product/1/2/other','https://shopee.vn/product/1.2','http://shopee.vn/product/1/2'])assert.equal(productIdentity(url),null);
 });
 test('history survives restart and recognizes files moved to video đã đăng',async()=>{
