@@ -33,7 +33,7 @@ export function createQuickScheduler({request,toast,reload}){
   }
   for(const video of get('rows').querySelectorAll('video')){video.onloadedmetadata=()=>{video.currentTime=Math.min(.1,video.duration/2 || 0);};video.onloadeddata=()=>{video.nextElementSibling.hidden=true;};video.onerror=()=>{video.nextElementSibling.hidden=false;video.nextElementSibling.textContent='Không có ảnh';};observer.observe(video);}count();
  }
- get('rows').oninput=event=>{const field=event.target.dataset.field,row=event.target.closest('tr');if(!field || !row)return;const d=drafts.get(row.dataset.id);d[field]=field==='selected'?event.target.checked:event.target.value;if(field==='mode'){row.querySelector('[data-field="due"]').disabled=d.mode==='now';row.querySelector('.quick-due-hint').hidden=d.mode==='now';}count();};
+ get('rows').oninput=event=>{const field=event.target.dataset.field,row=event.target.closest('tr');if(!field || !row)return;const d=drafts.get(row.dataset.id);d[field]=field==='selected'?event.target.checked:event.target.value;if(field==='caption')d.captionEdited=true;if(field==='mode'){row.querySelector('[data-field="due"]').disabled=d.mode==='now';row.querySelector('.quick-due-hint').hidden=d.mode==='now';}count();};
  async function removeVideos(ids){
   if(saving || deleting.size || !ids.length)return;
   if(!confirm(`Xóa ${ids.length} video khỏi thư viện và bảng lên lịch nhanh? File gốc trên máy vẫn được giữ.`))return;
@@ -53,8 +53,8 @@ export function createQuickScheduler({request,toast,reload}){
  get('all').onchange=()=>{for(const m of rows)drafts.get(m.id).selected=get('all').checked;render();};
  function apply(fn){if(!rows.length)return toast('Thư viện chưa có video');rows.forEach((m,i)=>fn(drafts.get(m.id),m,i));render();}
  get('spread').onclick=()=>{const start=Date.parse(get('start').value+':00+07:00'),gap=Number(get('gap').value);if(!Number.isFinite(start) || start<=Date.now() || !Number.isInteger(gap) || gap<1 || gap>525600)return toast('Chọn giờ bắt đầu trong tương lai và khoảng cách 1–525600 phút');apply((d,m,i)=>{d.mode='schedule';d.due=localTime(start+i*gap*60000);});};
- get('copy').onclick=()=>apply(d=>{d.caption=get('caption').value;});
- get('names').onclick=()=>apply((d,m)=>{d.caption=m.name.replace(/\.(mp4|mov)$/i,'').slice(0,2200);});
+ get('copy').onclick=()=>apply(d=>{d.caption=get('caption').value;d.captionEdited=true;});
+ get('names').onclick=()=>apply((d,m)=>{d.caption=m.name.replace(/\.(mp4|mov)$/i,'').slice(0,2200);d.captionEdited=true;});
  get('save').onclick=async()=>{
   const chosen=[...rows];if(!chosen.length || saving || remoteBusy || deleting.size)return;
   try{
@@ -72,7 +72,7 @@ export function createQuickScheduler({request,toast,reload}){
   remoteBusy=data.jobs.some(j=>['remote_queued','remote_uploading','remote_confirming'].includes(j.status));
   const page=get('page').value;get('page').innerHTML='<option value="">Chọn Page</option>'+data.pages.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');get('page').value=page;
   const next=[...data.media].sort((a,b)=>a.name.localeCompare(b.name,'vi',{numeric:true}) || a.id.localeCompare(b.id));
-  for(const m of next)if(!drafts.has(m.id))drafts.set(m.id,{selected:false,caption:'',mode:'schedule',due:''});
+  for(const m of next){if(!drafts.has(m.id))drafts.set(m.id,{selected:false,caption:m.affiliate_caption||'',autoCaption:m.affiliate_caption||'',mode:'schedule',due:''});else{const d=drafts.get(m.id);if(!d.captionEdited&&d.caption===(d.autoCaption||'')){d.caption=m.affiliate_caption||'';d.autoCaption=d.caption;}}}
   for(const id of drafts.keys())if(!next.some(m=>m.id===id))drafts.delete(id);
   rows=next;const key=JSON.stringify(rows);if(key!==signature){signature=key;render();}else count();
  };

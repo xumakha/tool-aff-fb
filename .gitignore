@@ -1,4 +1,5 @@
 .env
-data/
+data/*
+!data/Tong-hop-affiliate.xlsx
 node_modules/
 dist/

@@ -2,7 +2,8 @@ import {stageScheduledMedia,rollbackScheduledMedia,finishScheduledMedia} from '.
 import http from 'node:http';
 import {fileURLToPath} from 'node:url';
 import {DatabaseSync} from 'node:sqlite';
-import {mkdirSync,readFileSync,createReadStream} from 'node:fs';
+import {mkdirSync,readFileSync,createReadStream,existsSync} from 'node:fs';
+import {resolve} from 'node:path';
 import {randomBytes,createCipheriv,createDecipheriv,timingSafeEqual} from 'node:crypto';
 import {Meta} from './meta.mjs';
 import {scanFolder, pickFolder, checkUnchanged, selectVideos} from './local-media.mjs';
@@ -10,10 +11,11 @@ if (process.env.HOST && !['127.0.0.1','localhost','::1'].includes(process.env.HO
 const root = process.env.DATA_DIR || 'data'; mkdirSync(root,{recursive:true});
 const db = new DatabaseSync(`${root}/reels.sqlite`);
 db.exec('CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT)');
-const masterPath=()=>db.prepare("SELECT value FROM settings WHERE key='affiliate_master'").get()?.value||'';
-async function pickAffiliateMaster(){
- if(process.env.DESKTOP_MODE!=='1'||!process.send)throw Error('Mở bản desktop Electron để chọn file tổng hợp cố định');
- const id=randomBytes(16).toString('hex');return new Promise((resolve,reject)=>{const listener=message=>{if(message.type==='affiliate-master-picked'&&message.id===id){clearTimeout(timer);process.off('message',listener);message.error?reject(Error(message.error)):resolve(message.path||'');}};const timer=setTimeout(()=>{process.off('message',listener);reject(Error('Hết thời gian chọn file'));},180000);process.on('message',listener);process.send({type:'affiliate-master-pick',id});});
+db.exec('CREATE TABLE IF NOT EXISTS shopee_sources(path TEXT PRIMARY KEY,url TEXT NOT NULL,name TEXT NOT NULL)');
+async function masterPath(){
+ const {ensureAffiliateMaster}=await import('./affiliate.mjs');
+ const previous=resolve(root,'Tong-hop-affiliate.xlsx');
+ return ensureAffiliateMaster(process.env.AFFILIATE_MASTER_DIR||root,existsSync(previous)?previous:db.prepare("SELECT value FROM settings WHERE key='affiliate_master'").get()?.value||'');
 }
 
 db.exec(`PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS pages(id TEXT PRIMARY KEY,name TEXT,token TEXT); CREATE TABLE IF NOT EXISTS media(id TEXT PRIMARY KEY,name TEXT,size INTEGER); CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,page_id TEXT,media_id TEXT,caption TEXT,due TEXT,status TEXT DEFAULT 'queued',video_id TEXT,error TEXT,created TEXT);`);
@@ -21,6 +23,7 @@ db.exec(`PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS pages(id TEXT PRIMA
 const columns = db.prepare('PRAGMA table_info(media)').all().map(c=>c.name);
 for (const [name,type] of [['path','TEXT'],['mtime','REAL'],['folder','TEXT'],['hidden','INTEGER DEFAULT 0']]) if (!columns.includes(name)) db.exec(`ALTER TABLE media ADD COLUMN ${name} ${type}`);
 const jobColumns=db.prepare('PRAGMA table_info(jobs)').all().map(c=>c.name);
+if(!columns.includes('affiliate_caption'))db.exec("ALTER TABLE media ADD COLUMN affiliate_caption TEXT DEFAULT ''");
 for(const [name,type] of [['batch_id','TEXT'],['progress','INTEGER DEFAULT 0'],['remote_now','INTEGER DEFAULT 0']])if(!jobColumns.includes(name))db.exec(`ALTER TABLE jobs ADD COLUMN ${name} ${type}`);
 // Hide scheduled media atomically with job creation, preserving source and history.
 db.exec(`CREATE TRIGGER IF NOT EXISTS hide_scheduled_media AFTER INSERT ON jobs
@@ -43,9 +46,17 @@ function crypt(value, decrypt=false) {
  const iv=randomBytes(12),c=createCipheriv('aes-256-gcm',key,iv); const data=Buffer.concat([c.update(value),c.final()]); return [iv,c.getAuthTag(),data].map(x=>x.toString('hex')).join('.');
 }
 let shopeeState={running:false,message:'Chỉ hỗ trợ bản desktop Electron',downloaded:0};
+let shopeeImports=0;
 process.on('message',async message=>{
  if(message.type==='shopee-state')shopeeState=message.state;
- if(message.type==='shopee-file')try{const {files}=await selectVideos([message.path]);for(const file of files)db.prepare('INSERT INTO media(id,name,size,path,mtime,folder) VALUES(?,?,?,?,?,?)').run(randomBytes(16).toString('hex'),file.name,file.size,file.path,file.mtime,null);}catch(error){shopeeState.message='Đã tải nhưng không thêm được thư viện: '+error.message;}
+ if(message.type==='shopee-file'){shopeeImports++;try{
+  const {files}=await selectVideos([message.path]);for(const file of files){
+   if(message.url)db.prepare('INSERT INTO shopee_sources(path,url,name) VALUES(?,?,?) ON CONFLICT(path) DO UPDATE SET url=excluded.url,name=excluded.name').run(file.path,message.url,file.name);
+   if(db.prepare('SELECT id FROM media WHERE path=? AND size=? AND mtime=?').get(file.path,file.size,file.mtime))continue;
+   if(message.reused)continue;
+   db.prepare('INSERT INTO media(id,name,size,path,mtime,folder) VALUES(?,?,?,?,?,?)').run(randomBytes(16).toString('hex'),file.name,file.size,file.path,file.mtime,null);
+  }
+ }catch(error){shopeeState.message='Đã tải nhưng không thêm được thư viện: '+error.message;}finally{shopeeImports--;}}
 });
 const states = new Map();
 function json(res,status,data){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(data));}
@@ -75,17 +86,24 @@ const server=http.createServer(async(req,res)=>{try{
   const pages=await meta.pages(token.access_token);for(const p of pages)if(p.access_token)db.prepare('INSERT OR REPLACE INTO pages VALUES(?,?,?)').run(p.id,p.name,crypt(p.access_token));
   res.writeHead(302,{Location:'/', 'Set-Cookie':'meta_state=; HttpOnly; SameSite=Lax; Path=/auth; Max-Age=0'});return res.end();
  }
- if(url.pathname==='/api/affiliate/master' && req.method==='GET')return json(res,200,{path:masterPath()});
- if(url.pathname==='/api/affiliate/master' && req.method==='POST'){
-  const file=await pickAffiliateMaster();if(file)db.prepare('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)').run('affiliate_master',file);return json(res,200,{path:masterPath()});
+ if(url.pathname==='/api/affiliate/master' && req.method==='GET')return json(res,200,{path:await masterPath()});
+ if(url.pathname==='/api/affiliate/sources' && req.method==='GET')return json(res,200,{count:db.prepare('SELECT COUNT(*) AS count FROM shopee_sources').get().count,running:shopeeState.running||shopeeImports>0});
+ if(url.pathname==='/api/affiliate/master/download' && req.method==='GET'){
+  const file=await masterPath();const bytes=await (await import('node:fs/promises')).readFile(file);
+  res.writeHead(200,{'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','Content-Disposition':'attachment; filename="Tong-hop-affiliate.xlsx"','Cache-Control':'no-store'});return res.end(bytes);
  }
  if(url.pathname==='/api/affiliate/inspect' && req.method==='POST'){
-  const {inspectFile}=await import('./affiliate.mjs');return json(res,200,await inspectFile(JSON.parse(await body(req,29*1024*1024))));
+  const {inspectFile,suggestMapping}=await import('./affiliate.mjs');const result=await inspectFile(JSON.parse(await body(req,29*1024*1024)));return json(res,200,{...result,suggestion:suggestMapping(result.sheets)});
  }
  if(url.pathname==='/api/affiliate/merge' && req.method==='POST'){
-  if(shopeeState.running)throw Error('Đợi lượt tải Shopee kết thúc trước khi ghép affiliate');
-  const file=masterPath();if(!file)throw Error('Chọn file Excel tổng hợp cố định trước');
-  const {appendAffiliate}=await import('./affiliate.mjs');return json(res,200,await appendAffiliate(file,JSON.parse(await body(req))));
+  if(shopeeState.running||shopeeImports)throw Error('Đợi lượt tải Shopee kết thúc trước khi ghép affiliate');
+  const file=await masterPath();
+  const input=JSON.parse(await body(req));const sourceRows=input.video?undefined:db.prepare('SELECT DISTINCT url,name FROM shopee_sources ORDER BY rowid').all();
+  if(sourceRows&&!sourceRows.length)throw Error('Chưa có dữ liệu video Shopee. Tải video hoặc nhập Excel video cũ.');
+  const {appendAffiliate,productKey}=await import('./affiliate.mjs');const result=await appendAffiliate(file,input,sourceRows);
+  const sources=db.prepare('SELECT * FROM shopee_sources').all();
+  for(const row of result.matchedRows)for(const source of sources){if(source.name===row[6]&&productKey(source.url)===productKey(row[0]))db.prepare('UPDATE media SET affiliate_caption=? WHERE path=?').run(row[6]+'\n'+row[7],source.path);}
+  delete result.matchedRows;return json(res,200,result);
  }
  if(url.pathname==='/api/shopee' && req.method==='GET')return json(res,200,shopeeState);
  if(url.pathname==='/api/shopee' && req.method==='POST'){

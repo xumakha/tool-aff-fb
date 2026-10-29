@@ -3,6 +3,21 @@ import assert from 'node:assert/strict';
 import ExcelJS from 'exceljs';
 import {inspectFile,mergeAffiliate,productKey,appendAffiliate} from '../affiliate.mjs';
 import excel from '../desktop/shopee-excel.cjs';
+test('managed master persists and migrates old workbook without changing its source',async()=>{
+ const {ensureAffiliateMaster}=await import('../affiliate.mjs');
+ const {mkdtemp,readFile,rm}=await import('node:fs/promises');const {tmpdir}=await import('node:os');const {join}=await import('node:path');
+ const dir=await mkdtemp(join(tmpdir(),'managed-master-'));
+ try{
+  const file=await ensureAffiliateMaster(join(dir,'new'));const book=new ExcelJS.Workbook();await book.xlsx.readFile(file);
+  assert.equal(book.getWorksheet('sheet 1').getCell('D1').value,'Nội dung');
+  book.getWorksheet('sheet 1').getCell('B2').value='Existing';await book.xlsx.writeFile(file);
+  const before=await readFile(file);const migrated=await ensureAffiliateMaster(join(dir,'migrated'),file);
+  assert.deepEqual(await readFile(migrated),before);assert.deepEqual(await readFile(file),before);
+  assert.equal(await ensureAffiliateMaster(join(dir,'migrated'),join(dir,'missing.xlsx')),migrated);
+  assert.deepEqual(await readFile(migrated),before);
+  await assert.rejects(()=>ensureAffiliateMaster(join(dir,'failed'),join(dir,'missing.xlsx')),/ENOENT/);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
 test('matches Shopee product identities without trusting title or tracking query',()=>{
  assert.equal(productKey('https://shopee.vn/Áo-đẹp-i.00123.456?x=2'),'123:456');assert.equal(productKey('https://shopee.vn/product/123/456'),'123:456');
  for(const link of ['https://evil.test/product/123/456','https://s.shopee.vn/abc','https://shopee.vn/ten-shop','https://shopee.vn/product/123/4567/extra'])assert.equal(productKey(link),null);

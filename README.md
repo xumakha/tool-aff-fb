@@ -74,9 +74,24 @@ Nếu có file thay đổi/mất hoặc video đã có bài chờ, đang xử l�
 
 ## Tải video từ shop Shopee (desktop, thử nghiệm)
 
+Tool thử kích hoạt ô video có biểu tượng/nút phát trong phần thông tin sản phẩm, rồi phát video ở chế độ tắt tiếng để nguồn tải xuất hiện. Tool đọc các thẻ video/source và tài nguyên MP4 được tải; playlist HLS/DASH không được tải nhầm thành MP4. Khi Shopee đổi cấu trúc ô video hoặc chỉ cung cấp streaming chưa hỗ trợ, xem **Sản phẩm bỏ qua** để biết link và lý do.
+
+App tự kiểm tra nhãn **Hết hàng / Sold out / Out of stock** hiển thị trong phần thông tin sản phẩm trước khi tải hoặc dùng lại video cũ. Sản phẩm nhận diện hết hàng được bỏ qua, không thêm vào Excel của lượt tải hay nhập lại vào tool; thống kê cuối lượt có số sản phẩm hết hàng. Video và dữ liệu đã lưu từ trước được giữ nguyên. Việc nhận diện dựa trên giao diện Shopee, không phải kiểm tra tồn kho thời gian thực qua API.
+
+Khi chuyển sang trang đăng nhập, bộ quét tạm chờ (tối đa 10 phút), tiếp tục sau khi đăng nhập và trang tải xong. Dùng đăng nhập trực tiếp bằng số điện thoại/email hoặc mã QR Shopee; cửa sổ đăng nhập bên ngoài Shopee chưa được hỗ trợ. Nếu lượt quét lỗi, cửa sổ Shopee được giữ để hoàn tất đăng nhập; xem thông báo trong tool rồi bấm tải lại. Nếu chính tiến trình hiển thị Shopee bị dừng, tool hiển thị lý do/mã thoát thay vì chỉ đóng cửa sổ.
+
+### Luồng nhanh
+
+1. Nhập link shop, bấm tải và chọn thư mục video. App tự tạo Excel `video-shopee-<mã lượt tải>.xlsx` cạnh video, không hỏi nơi lưu Excel.
+2. Link gốc và tên file của từng video tải thành công hoặc được nhận diện trong lịch sử tải tự lưu vào tool, giữ qua các lần mở app. Không cần upload lại Excel video.
+3. Tải file đối chiếu affiliate lên. Nếu nhận diện được duy nhất sheet, dòng tiêu đề và hai cột link, app tự ghép và thêm vào Excel tổng. Nếu cấu trúc chưa rõ, chọn lại cột rồi bấm **Ghép**. File vẫn cần cả link sản phẩm gốc và link affiliate để đối chiếu chính xác.
+4. Bảng **Lên lịch nhanh** tự điền caption tên video + link affiliate cho video khớp. Caption đã sửa thủ công được giữ. Chọn Page, kiểm tra video/caption và giờ đăng rồi bấm đăng. Việc ghép affiliate không tự đăng Facebook; bảng nhanh vẫn đăng toàn bộ video hiện có trong thư viện.
+
+Video tải trước bản cập nhật có thể dùng **Dùng Excel video cũ thay cho dữ liệu tự lưu**, hoặc quét lại shop trong thư mục tải cũ để app nhận lịch sử. Dữ liệu link gốc tự lưu nằm trong database cục bộ; Excel tổng vẫn đồng bộ qua Git như hướng dẫn bên dưới.
+
 Trong **Chọn video → Tải video shop Shopee**, nhập link như `https://shopee.vn/ipone_vietnam`, bấm **Tải video của shop** và chọn thư mục lưu. App mở cửa sổ Shopee riêng; đăng nhập hoặc xử lý CAPTCHA tại đó nếu được yêu cầu. Phiên đăng nhập Shopee được lưu riêng trong dữ liệu Electron. Đóng cửa sổ Shopee để dừng lượt quét; các video đã tải vẫn được giữ.
 
-Sau khi chọn thư mục video, app mở hộp thoại **Lưu danh sách video Shopee** để chọn vị trí và tên file Excel `.xlsx`. Hủy hộp thoại sẽ hủy lượt tải. Excel được tạo từ chính mẫu Shopee `Batch Custom Links (1).xlsx` (đóng gói tại `desktop/templates/shopee-batch-custom-links.xlsx`), giữ tên tab **Sheet1** và định dạng các cột gốc A–F. Thêm cột G để lưu tên video. Excel có đúng 7 cột: **A: Liên kết gốc**, **B–F: Sub_id1, Sub_id2, Sub_id3, Sub_id4, Sub_id5**, **G: Tên sản phẩm**. Các cột Sub_id mặc định để trống để bạn điền trước khi chuyển đổi affiliate. Tên trong Excel là tên file video thực tế, **bao gồm `.mp4` và số thứ tự khi trùng tên**. Ví dụ `Áo đẹp (2).mp4`. Chỉ video tải thành công mới có dòng; file Excel được cập nhật sau từng video nên dừng quét vẫn giữ danh sách đã ghi. Nếu không tải được video nào, file chỉ có tiêu đề cột. Không mở Excel trong lúc tải để tránh Windows khóa file; nếu cập nhật Excel lỗi, lượt tải dừng và hiện thông báo, video đã tải được giữ nhưng dòng mới nhất có thể chưa được ghi.
+Sau khi chọn thư mục video, app tự lưu Excel `.xlsx` cạnh video với tên riêng cho từng lượt tải, giữ các file Excel cũ. Excel được tạo từ chính mẫu Shopee `Batch Custom Links (1).xlsx` (đóng gói tại `desktop/templates/shopee-batch-custom-links.xlsx`), giữ tên tab **Sheet1** và định dạng các cột gốc A–F. Thêm cột G để lưu tên video. Excel có đúng 7 cột: **A: Liên kết gốc**, **B–F: Sub_id1, Sub_id2, Sub_id3, Sub_id4, Sub_id5**, **G: Tên sản phẩm**. Các cột Sub_id mặc định để trống để bạn điền trước khi chuyển đổi affiliate. Tên trong Excel là tên file video thực tế, **bao gồm `.mp4` và số thứ tự khi trùng tên**. Ví dụ `Áo đẹp (2).mp4`. Video tải thành công hoặc được nhận diện trong lịch sử tải có dòng; file Excel được cập nhật sau từng video nên dừng quét vẫn giữ danh sách đã ghi. Nếu không tải được video nào, file chỉ có tiêu đề cột. Không mở Excel trong lúc tải để tránh Windows khóa file; nếu cập nhật Excel lỗi, lượt tải dừng và hiện thông báo, video đã tải được giữ nhưng dòng mới nhất có thể chưa được ghi.
 
 Tool cuộn trang, thử chuyển trang và gom link sản phẩm, nhận diện biểu tượng `.shopee_ic .stroke-none` (kèm biến thể cùng phần tử). Tool kiểm tra cả các sản phẩm không có biểu tượng để tránh phụ thuộc hoàn toàn vào class. Mỗi sản phẩm được mở để đọc nguồn MP4 từ video hoặc tài nguyên đã tải. Video lưu bằng tiêu đề sản phẩm, giữ tiếng Việt, thay ký tự không hợp lệ trên Windows; tên trùng được thêm số. File tải hoàn chỉnh được tự thêm vào thư viện. File tạm được xóa khi tải lỗi; không ghi đè video có sẵn. Tool gom sản phẩm theo cặp ID shop/sản phẩm nên các biến thể link của cùng sản phẩm chỉ được kiểm tra một lần. Lịch sử tải được lưu trong `.shopee-downloads.json` tại thư mục lưu video. Khi chạy lại cùng thư mục, nếu file đã tải còn nguyên metadata và MP4 hợp lệ (ở thư mục đó hoặc `video đã đăng`), tool bỏ qua tải mạng, ghi lại dòng vào Excel và tăng số **đã có**. Nếu file mất hoặc thay đổi, tool tải lại. Các video từ phiên bản cũ chưa có lịch sử không được tự nhận diện hoặc xóa; lần tải đầu sau cập nhật có thể vẫn tạo file tên có số. Hai sản phẩm khác ID dùng cùng nội dung video vẫn được giữ riêng để đối chiếu đúng link affiliate.
 
@@ -86,18 +101,34 @@ Tool cuộn trang, thử chuyển trang và gom link sản phẩm, nhận diện
 
 Sau khi tải video và có file đối chiếu từ Shopee, mở **Ghép link Shopee Affiliate**:
 
-1. Chọn Excel video đã xuất (A: Liên kết gốc, B–F: Sub_id1–Sub_id5, G: Tên sản phẩm).
+1. App mặc định dùng dữ liệu video Shopee tự lưu. Với Excel cũ, bật **Dùng Excel video cũ thay cho dữ liệu tự lưu** rồi chọn file (A: Liên kết gốc, B–F: Sub_id1–Sub_id5, G: Tên sản phẩm).
 2. Chọn file Shopee có cả link sản phẩm gốc và link affiliate. Hai file đầu vào hỗ trợ `.xlsx` và `.csv` UTF-8 (dấu phẩy/chấm phẩy), tối đa 20 MB/file; `.xls` cần lưu lại thành `.xlsx` trước.
-3. Chọn sheet, dòng tiêu đề (trong 30 dòng đầu), cột link gốc của từng file và cột affiliate trong file Shopee. Kiểm tra dòng mẫu trước khi ghép.
-4. Bấm **Chọn file tổng hợp (.xlsx)** để chọn một file Excel có sẵn trên máy. Có thể dùng workbook trống; tool tạo tab **sheet 1** trong file đó. Tool nhớ đường dẫn qua các lần mở app. Việc chọn và ghi trực tiếp file cố định dùng bản desktop Electron.
-5. Đóng file đó trong Excel, bấm **Ghép và thêm vào file tổng hợp**. Tool thêm dòng vào chính file đã chọn, không tải xuống/tạo thêm file kết quả sau mỗi lượt.
+3. App tự nhận diện và ghép khi cấu trúc file affiliate rõ ràng. Nếu chưa nhận diện được duy nhất, chọn sheet, dòng tiêu đề (trong 30 dòng đầu), cột link gốc và cột affiliate rồi bấm Ghép. Có thể kiểm tra và đổi lựa chọn trong phần cột.
+4. App tự tạo **Tong-hop-affiliate.xlsx** trong thư mục dữ liệu (`data/`), giữ qua các lần mở. Nếu đã chọn file tổng ở phiên bản cũ, app sao chép file đó một lần, giữ nguyên bản gốc. Nếu file cũ không đọc được, cần khôi phục file đó trước khi tiếp tục.
+5. Đóng file tổng trong Excel, bấm **Ghép và thêm vào file tổng hợp**. Bấm **Tải bản sao Excel tổng** để lấy bản sao ra ngoài.
+
+Khi chạy từ repo bằng `npm start` (DATA_DIR mặc định) hoặc `npm run desktop`, file tổng nằm tại **data/Tong-hop-affiliate.xlsx** trong repo và được phép đưa lên Git. Bản `.exe` đã đóng gói vẫn lưu trong **Mở thư mục dữ liệu → data**, không tự đồng bộ với repo.
+
+### Mang Excel tổng sang máy khác bằng Git
+
+Đóng app và Excel trước khi đồng bộ. Sau khi ghép xong trên máy hiện tại:
+
+```sh
+git add data/Tong-hop-affiliate.xlsx
+git commit -m "Update affiliate master workbook"
+git push
+```
+
+Máy khác chạy `git pull` trước khi mở app từ mã nguồn; app dùng ngay Excel tổng vừa kéo về. Lần đầu cần cài dependencies bằng `npm ci`. Các thay đổi mã nguồn hỗ trợ tính năng này cũng cần được commit/push cùng lần đầu.
+
+Đồng bộ lần lượt từng máy: push ở máy đang dùng, rồi pull ở máy tiếp theo trước khi sửa. Excel là file nhị phân, Git không tự ghép nội dung nếu hai máy sửa đồng thời. File đưa lên Git chứa tên sản phẩm và link affiliate, người có quyền đọc repo sẽ xem được. Chỉ Excel tổng đi theo Git; `.env`, database, tài khoản Facebook, lịch đăng và video không được đồng bộ. Với bản `.exe`, sao chép file tổng giữa repo và thư mục dữ liệu của app khi cần đồng bộ.
 
 Tab **sheet 1** có đúng 4 cột: **A: Liên kết gốc**, **B: Tên sản phẩm**, **C: Link affiliate**, **D: Nội dung**. Cột D là tên sản phẩm + ký tự xuống dòng + link affiliate, có bật Wrap Text. File tổng hợp không có các cột Sub_id; Excel video đầu vào vẫn giữ định dạng 7 cột để dùng chuyển đổi affiliate. Chỉ thêm các dòng có tên sản phẩm và ghép được duy nhất một link affiliate hợp lệ. Tab `sheet 1` đã có phải có đúng tiêu đề A–D; các tab khác và dòng cũ được giữ. Nếu file có tab `Tổng hợp sản phẩm` của phiên bản cũ, tab đó được giữ; các lượt mới ghi vào `sheet 1`. File nguồn hai bên không bị sửa. Tool đọc lại file tổng hợp mỗi lượt và ghi qua file tạm rồi thay thế file đích khi hoàn tất; nếu file bị khóa hoặc vừa thay đổi bên ngoài thì báo lỗi.
 
 
 Ghép bằng cặp ID shop/sản phẩm: URL dạng `…-i.SHOPID.ITEMID` và `/product/SHOPID/ITEMID` vẫn khớp khi khác slug/tham số. Link gốc rút gọn cần thay bằng URL sản phẩm đầy đủ. Dòng chưa khớp hoặc có nhiều affiliate khác nhau không được thêm vào tổng hợp; tổng số từng loại được hiển thị sau khi ghép. Dòng đã có cùng sản phẩm, tên video và affiliate được bỏ qua; thay đổi một trong các giá trị này được coi là bản ghi mới. Các Sub_id không được đưa vào file tổng hợp.
 
-Tool chỉ sao chép affiliate từ file bạn cung cấp, không tự chuyển đổi link và chưa tự comment lên Facebook. Dữ liệu hai file nguồn được xử lý trên máy chạy tool, giữ trong bộ nhớ tối đa 30 phút (tối đa 8 file/phiên thời gian này); hết phiên cần chọn lại. File tổng hợp tối đa 50 MB. Chọn lại file tổng hợp khi đổi vị trí hoặc chuyển máy.
+Tool chỉ sao chép affiliate từ file bạn cung cấp, không tự chuyển đổi link và chưa tự comment lên Facebook. Dữ liệu hai file nguồn được xử lý trên máy chạy tool, giữ trong bộ nhớ tối đa 30 phút (tối đa 8 file/phiên thời gian này); hết phiên cần chọn lại. File tổng hợp tối đa 50 MB. Sao lưu file tổng cùng thư mục dữ liệu khi chuyển máy.
 
 ## Dữ liệu lưu ở đâu?
 
@@ -108,6 +139,8 @@ Khi thêm video, tool tạo thư mục con **`video đã đăng`** ngay trong th
 Xóa khỏi thư viện, hủy lịch và Clear lịch sử không xóa file video. Không tự di chuyển/đổi tên/chỉnh sửa video ở đường dẫn mới trong lúc chờ tải lên. `data/reels.sqlite` lưu đường dẫn hiện tại, metadata video, caption, lịch, trạng thái và token Page đã mã hóa. Video từ bản upload cũ không có đường dẫn gốc vẫn ở `data/` và không tự chuyển. Sao lưu SQLite, khóa mã hóa và video riêng; không commit `.env` hoặc `data/`.
 
 ## Xóa video tải trùng
+
+**Dọn nhanh video trùng (1), (2)…** trong Thư viện video: bấm nút, chọn thư mục, rồi xác nhận một lần. App tự quét cả thư mục con, so sánh nội dung và xóa tất cả bản trùng đủ điều kiện; không cần tick từng file. Hủy chọn thư mục hoặc hủy xác nhận sẽ không xóa gì. Video khác nội dung, bản duy nhất còn lại và video có lịch đăng/lịch sử đăng được giữ. Kết quả hiển thị số file đã xóa và các file phải bỏ qua. Chức năng chỉ xóa video MP4/MOV có đuôi số và nội dung giống hệt bản được giữ lại, không xóa mọi file chỉ vì tên có `(1)` hoặc `(2)`.
 
 Mở **Thư viện video → Xóa video trùng trên máy**, chọn thư mục (hoặc nhập đường dẫn), bấm **Tìm video trùng**. Tool quét cả thư mục con, gồm `video đã đăng`, không đi theo symlink, tối đa 10000 video/lượt. Các file như `Tên.mp4`, `Tên (1).mp4`, `Tên (2).mp4` được nhóm theo tên cơ sở và phần mở rộng, rồi so sánh SHA-256. Chỉ file có đuôi số và giống hệt nội dung một file được giữ lại mới được đưa vào danh sách xóa; file khác nội dung giữ nguyên. Nếu không có tên gốc, giữ bản có số nhỏ nhất. File có lịch đăng hoặc lịch sử đăng (kể cả đã hủy) được giữ lại.
 
