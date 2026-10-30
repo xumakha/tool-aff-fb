@@ -3,6 +3,17 @@ const {videoURL}=require('./shopee-url.cjs');
 function probeProductMedia(){
  const selector='[aria-label*="video" i],[aria-label*="play" i],[aria-label*="phát" i],[title*="video" i],[data-testid*="video" i],.icon-play,.shopee-svg-icon.icon-play,.shopee_ic_video,.shopee_ic .stroke-none,.shopee_ic.stroke-none';
  const excluded='a[href],.product-variation,[role="option"],.product-detail,.shopee-product-rating,[data-testid*="recommend" i],[data-testid*="review" i]';
+ // A poster can open a separate video dialog. Associate only dialogs created
+ // after our product-media interaction, not pre-existing review/login dialogs.
+ const dialogState=document.__reelsMediaDialogs||(document.__reelsMediaDialogs={before:new Set(),tracked:new Set(),until:0});
+ const dialogs=()=>Array.from(document.querySelectorAll('[role="dialog"]')).filter(node=>node.getAttribute?.('role')==='dialog');
+ const trackDialogs=()=>{
+  for(const node of dialogState.tracked)if(!node.isConnected)dialogState.tracked.delete(node);
+  if(Date.now()>dialogState.until)return;
+  for(const node of dialogs())if(!dialogState.before.has(node)&&!node.closest(excluded)&&!node.querySelector('input,textarea,form')&&node.querySelector('video'))dialogState.tracked.add(node);
+ };
+ const beforeActivation=()=>{dialogState.before=new Set(dialogs());dialogState.until=Date.now()+5000;};
+ trackDialogs();
  // Recognize unlabelled SVG play triangles as well as the old icon classes.
  // Only recognize a single, closed triangle pointing right; generic SVGs can be
  // carousel arrows, purchase controls or decorative badges.
@@ -50,7 +61,7 @@ function probeProductMedia(){
    control.dataset.reelsVideoActivated='1';
    control.scrollIntoView({block:'center'});
    for(const type of ['mouseover','mouseenter'])control.dispatchEvent(new MouseEvent(type,{bubbles:true}));
-   control.click();activated=true;break;
+   beforeActivation();control.click();activated=true;break;
   }
  }
  // The supplied diagnostics show a lazy player with a visible IMG sibling
@@ -71,10 +82,11 @@ function probeProductMedia(){
    if(!gallery||gallery.tagName!=='SECTION')continue;
    poster.dataset.reelsVideoActivated='1';poster.scrollIntoView({block:'center'});
    for(const type of ['mouseover','mouseenter'])poster.dispatchEvent(new MouseEvent(type,{bubbles:true}));
-   poster.click();activated=true;root=root||gallery;break;
+   beforeActivation();poster.click();activated=true;root=root||gallery;break;
   }
  }
- const videos=Array.from((root||document).querySelectorAll('video')).filter(video=>!video.closest?.(excluded));
+ trackDialogs();
+ const videos=[...new Set([...Array.from((root||document).querySelectorAll('video')),...Array.from(dialogState.tracked).flatMap(node=>Array.from(node.querySelectorAll('video')))])].filter(video=>!video.closest?.(excluded));
  const urls=[];
  for(const video of videos){video.muted=true;try{video.play()?.catch(()=>{});}catch{}urls.push(video.currentSrc,video.src,...Array.from(video.querySelectorAll('source')).map(s=>s.src));}
  // A blob player can still request an ordinary MP4 resource underneath. Do not

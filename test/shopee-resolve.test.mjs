@@ -17,6 +17,12 @@ test('downloads immediately when metadata already contains a source',async()=>{
  assert.equal(result.downloaded,true);assert.deepEqual(calls,[[first]]);
 });
 
+test('uses metadata without clicking the gallery, then activates playback only if that source fails',async()=>{
+ const activations=[],downloads=[];
+ const result=await resolveProductVideo({probe:async({activate})=>{activations.push(activate);return {urls:activate?[second]:[]};},checkStock:async()=>false,readSources:()=>[first],pause:async()=>{},download:async sources=>{downloads.push(sources);if(sources.includes(first))throw Object.assign(Error('HTTP 404'),{sourceFailure:true});}});
+ assert.equal(result.downloaded,true);assert.deepEqual(activations,[false,true]);assert.deepEqual(downloads,[[first],[second]]);
+});
+
 test('keeps probing after bad metadata and downloads a later playback source once',async()=>{
  const calls=[];let probes=0,waits=0;
  const result=await resolveProductVideo({probe:async()=>({title:'Product',activated:++probes===1,urls:probes<3?[first]:[first,second]}),checkStock:async()=>false,pause:async()=>waits++,download:async sources=>{calls.push(sources);if(sources.includes(first))throw Object.assign(Error('image/webp'),{sourceFailure:true});}});

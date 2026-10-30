@@ -7,7 +7,8 @@ async function resolveProductVideo({probe,checkStock,readSources=()=>[],readDiag
  for(let attempt=0;attempt<attempts;attempt++){
   if(attempt)await pause(1000);
   if(await checkStock())return {soldOut:true};
-  data=await probe();activated=activated||!!data.activated;
+  const hasNewSource=readSources().some(url=>downloadableVideo(url)&&!tried.has(url));
+  data=await probe({activate:!hasNewSource});activated=activated||!!data.activated;
   data.urls=[...new Set([...readSources(),...(data.urls||[])])];
   const api=readDiagnostics();
   if(!data.urls.some(downloadableVideo)&&api.read&&api.apiError!=null&&String(api.apiError)!=='0')return {data,activated,downloaded:false,apiError:api.apiError};

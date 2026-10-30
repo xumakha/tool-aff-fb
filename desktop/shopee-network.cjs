@@ -17,8 +17,8 @@ function productVideos(payload,identity,requestMatches=false){
  const excluded=/image|thumb|cover|poster|snapshot|avatar|description|caption|title|tracking|recommend|related|rating|review/i;
  function add(value,base){
   if(typeof value!=='string')return;
-  // Keep the exact signed URL. Relative paths require an explicit CDN URL in
-  // the same metadata; a video ID alone does not establish a download host.
+  // Keep signed URLs intact. Generic relative format URLs need a declared
+  // base; the documented video_id routes are handled separately below.
   let candidate=value.trim();
   if(candidate.startsWith('//'))candidate='https:'+candidate;
   else if(base&&!/^[a-z][a-z\d+.-]*:/i.test(candidate)&&/^\/?api\/v\d+\/[^?#]+\.mp4(?:[?#]|$)/i.test(candidate))candidate=new URL('/'+candidate.replace(/^\//,''),base).href;

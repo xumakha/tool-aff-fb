@@ -41,4 +41,5 @@ const server=http.createServer((req,res)=>{requests++;res.setHeader('Content-Typ
   assert.equal((await win.webContents.executeJavaScript(mediaScript,true)).activated,false);
  }
  console.log('PASS: diagnostic gallery poster activates once; purchase/favorite and review controls untouched');
+ await require('./shopee-dialog-electron.cjs')(win);
 })().catch(error=>{console.error(error);exitCode=1;}).finally(async()=>{win?.destroy();server.close();if(folder)await rm(folder,{recursive:true,force:true});app.exit(exitCode);});
