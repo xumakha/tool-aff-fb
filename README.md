@@ -219,3 +219,5 @@ Unit tests kiểm tra scan thư mục, tên Unicode, file đổi/mất, protocol
 Khoảng cách bình luận được cộng/trừ ngẫu nhiên 10 giây sau mỗi lần gửi, tối thiểu 5 giây (ví dụ nhập 60 giây thì chờ 50–70 giây). Ô tick ở đầu cột chọn bài áp dụng cho toàn bộ kết quả quét, kể cả các trang tiếp theo; bỏ tick để bỏ chọn tất cả.
 
 Lượt quét bình luận yêu cầu Meta trả bài mới nhất trước và bảng giữ nguyên thứ tự mới nhất xuống cũ nhất qua các trang. Nhập 10 thì chỉ xét 10 bài mới nhất API trả về (hoặc ít hơn nếu Page có ít bài hơn). Bài đã có bình luận của Page hoặc không khớp Excel vẫn tính trong giới hạn; không quét bài cũ để bù số bài đủ điều kiện.
+
+Trong **Thư viện video**, tick từng video hoặc **Tick tất cả video**, rồi bấm **Xóa video đã tick**. Nút **Clear tất cả video** dọn toàn bộ thư viện hiện tại mà không cần tick. Cả hai đều yêu cầu xác nhận, giữ file gốc trên máy và cập nhật bảng lên lịch nhanh; video không xóa được sẽ được báo và giữ lại.

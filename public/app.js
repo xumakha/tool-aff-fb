@@ -7,12 +7,37 @@ const esc=value=>String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&l
 function toast(message){$('toast').textContent=message;$('toast').hidden=false;setTimeout(()=>$('toast').hidden=true,6500);}
 async function request(path,options){const res=await fetch(path,options);const result=await res.json();if(!res.ok)throw new Error(result.error || 'Yêu cầu thất bại');if(result.archiveWarnings?.length)alert(result.archiveWarnings.join('\n'));return result;}
 const renderProgress=createUploadProgress(document.querySelector('.schedule'));
-let librarySignature='';
+let librarySignature='',libraryMedia=[],libraryDeleting=false;
+const librarySelected=new Set();
+$('media-list').insertAdjacentHTML('beforebegin','<div class="library-actions"><label><input type="checkbox" id="library-all"> Tick tất cả video</label><span id="library-selected-count" role="status"></span><button type="button" class="secondary" id="library-delete">Xóa video đã tick</button><button type="button" class="secondary" id="library-clear">Clear tất cả video</button></div>');
+function libraryControls(){
+ const all=$('library-all');all.checked=libraryMedia.length>0&&librarySelected.size===libraryMedia.length;all.indeterminate=librarySelected.size>0&&!all.checked;all.disabled=libraryDeleting||!libraryMedia.length;
+ $('library-selected-count').textContent=`${librarySelected.size} video đã tick`;
+ $('library-delete').disabled=libraryDeleting||!librarySelected.size;$('library-clear').disabled=libraryDeleting||!libraryMedia.length;
+ for(const checkbox of $('media-list').querySelectorAll('.library-check')){checkbox.checked=librarySelected.has(checkbox.dataset.id);checkbox.disabled=libraryDeleting;}
+ for(const button of $('media-list').querySelectorAll('.remove-media'))button.disabled=libraryDeleting;
+}
+async function removeLibraryVideos(ids){
+ if(libraryDeleting||!ids.length)return;
+ if(!confirm(`Xóa ${ids.length} video khỏi thư viện và bảng lên lịch nhanh? File gốc trên máy vẫn được giữ.`))return;
+ libraryDeleting=true;libraryControls();let removed=0;const errors=[];
+ try{
+  for(const id of ids){try{await request('/api/media/'+encodeURIComponent(id),{method:'DELETE'});librarySelected.delete(id);removed++;}catch(error){errors.push(error.message);}}
+  await load();toast(`Đã xóa ${removed}/${ids.length} video. File gốc vẫn được giữ.`+(errors.length?` ${errors.length} video chưa xóa: ${errors[0]}`:''));
+ }finally{libraryDeleting=false;libraryControls();}
+}
+$('library-all').onchange=()=>{librarySelected.clear();if($('library-all').checked)for(const media of libraryMedia)librarySelected.add(media.id);libraryControls();};
+$('library-delete').onclick=()=>removeLibraryVideos([...librarySelected]);
+$('library-clear').onclick=()=>removeLibraryVideos(libraryMedia.map(media=>media.id));
+$('media-list').onchange=event=>{if(!event.target.matches('.library-check'))return;event.target.checked?librarySelected.add(event.target.dataset.id):librarySelected.delete(event.target.dataset.id);libraryControls();};
 const previewObserver=new IntersectionObserver(entries=>{for(const entry of entries){if(!entry.isIntersecting)continue;const video=entry.target;video.src=video.dataset.src;previewObserver.unobserve(video);}},{rootMargin:'150px'});
 function renderLibrary(media){
+ libraryMedia=media;const ids=new Set(media.map(item=>item.id));for(const id of librarySelected)if(!ids.has(id))librarySelected.delete(id);
+ libraryControls();
  const signature=JSON.stringify(media);if(signature===librarySignature)return;librarySignature=signature;previewObserver.disconnect();
  $('media-count').textContent=`${media.length} VIDEO`;
- $('media-list').innerHTML=media.length?media.map(m=>`<article class="video"><div class="thumbnail"><video muted playsinline preload="metadata" data-src="/api/media/${esc(m.id)}/preview" aria-label="Xem trước ${esc(m.name)}"></video><span>Đang tải ảnh…</span></div><strong>${esc(m.name)}</strong><small>${(m.size/1024/1024).toFixed(1)} MB</small><small title="${esc(m.path || '')}">${esc(m.path || 'Video từ bản cũ')}</small><button class="secondary remove-media" data-id="${esc(m.id)}">Xóa khỏi thư viện</button></article>`).join(''):'<p>Chọn thư mục để đưa video vào thư viện. File gốc không bị sao chép.</p>';
+ $('media-list').innerHTML=media.length?media.map(m=>`<article class="video"><label class="library-select"><input type="checkbox" class="library-check" data-id="${esc(m.id)}" aria-label="Chọn ${esc(m.name)} để xóa"> Chọn để xóa</label><div class="thumbnail"><video muted playsinline preload="metadata" data-src="/api/media/${esc(m.id)}/preview" aria-label="Xem trước ${esc(m.name)}"></video><span>Đang tải ảnh…</span></div><strong>${esc(m.name)}</strong><small>${(m.size/1024/1024).toFixed(1)} MB</small><small title="${esc(m.path || '')}">${esc(m.path || 'Video từ bản cũ')}</small><button class="secondary remove-media" data-id="${esc(m.id)}">Xóa khỏi thư viện</button></article>`).join(''):'<p>Chọn thư mục để đưa video vào thư viện. File gốc không bị sao chép.</p>';
+ libraryControls();
  for(const video of $('media-list').querySelectorAll('video')){video.onloadedmetadata=()=>{video.currentTime=Math.min(0.1,video.duration/2 || 0);};video.onloadeddata=()=>{video.nextElementSibling.hidden=true;};video.onerror=()=>{video.nextElementSibling.hidden=false;video.nextElementSibling.textContent='Không có ảnh xem trước';};previewObserver.observe(video);}
 }
 async function load(){try{const data=await request('/api/state');$('notice').textContent=data.configured?'Đã cấu hình Meta. Kết nối Facebook để tải các Page bạn quản lý.':'Chưa kết nối Meta App. Bạn có thể nhập thư mục video; cấu hình .env trước khi kết nối Facebook và đăng bài thật.';
@@ -77,7 +102,7 @@ $('clear-history').onclick=async()=>{
 };
 $('refresh').onclick=load;load();setInterval(load,15000);
 
-$('media-list').onclick=async event=>{const button=event.target.closest('.remove-media');if(!button)return;if(!confirm('Xóa video khỏi thư viện? File gốc trên máy vẫn được giữ. Quét lại thư mục sẽ thêm video trở lại.'))return;button.disabled=true;try{await request('/api/media/'+button.dataset.id,{method:'DELETE'});await load();toast('Đã xóa khỏi thư viện. File gốc vẫn được giữ.');}catch(e){toast(e.message);}finally{button.disabled=false;}};
+$('media-list').onclick=event=>{const button=event.target.closest('.remove-media');if(button)void removeLibraryVideos([button.dataset.id]);};
 
 $('compose').insertAdjacentHTML('beforeend',`<form id="shopee-form"><h3>Tải video shop Shopee</h3><label for="shopee-url">Link shop</label><input id="shopee-url" type="url" required placeholder="https://shopee.vn/ipone_vietnam"><button id="shopee-start">Tải video của shop</button><p>Desktop Electron: chọn nơi lưu video và file Excel (.xlsx), đăng nhập Shopee nếu cần. Đóng cửa sổ Shopee để dừng. Video tải thành công tự vào thư viện.</p></form><p id="shopee-status" role="status"></p><details><summary>Lỗi tải Shopee</summary><pre id="shopee-errors"></pre></details>`);
 $('shopee-status').insertAdjacentHTML('afterend','<details><summary>Sản phẩm bỏ qua (tối đa 500 gần nhất)</summary><pre id="shopee-skipped"></pre></details>');
