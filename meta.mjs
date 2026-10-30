@@ -4,7 +4,7 @@ export class Meta {
     const url = new URL(`https://graph.facebook.com/${this.version}/${path}`);
     const response = await this.fetch(url, {method: body ? 'POST' : 'GET', headers: {Authorization: `Bearer ${token}`, ...(body ? {'Content-Type':'application/x-www-form-urlencoded'} : {})}, body: body ? new URLSearchParams(body) : undefined, signal: AbortSignal.timeout(120000)});
     const result = await response.json();
-    if (!response.ok || result.error) throw new Error(`Meta API: ${result.error?.code || response.status}. Kiểm tra quyền Page và cấu hình ứng dụng.`);
+    if (!response.ok || result.error) throw Object.assign(new Error(`Meta API: ${result.error?.code || response.status}. Kiểm tra quyền Page và cấu hình ứng dụng.`),{metaRejected:response.status<500&&!!result.error,metaCode:Number(result.error?.code)||Number(response.status)});
     return result;
   }
   async pages(token) {

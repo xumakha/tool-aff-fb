@@ -1,6 +1,6 @@
 {
   "name": "reels-desk",
-  "version": "0.3.3",
+  "version": "0.3.6",
   "private": true,
   "type": "module",
   "engines": {
@@ -34,6 +34,8 @@
       ".env.example",
       "package.json",
       "affiliate.mjs",
+      "affiliate-comments.mjs",
+      "master-view.mjs",
       "scheduled-media.mjs",
       "duplicate-videos.mjs"
     ],

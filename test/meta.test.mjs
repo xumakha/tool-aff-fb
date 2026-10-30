@@ -1,6 +1,12 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {Meta} from '../meta.mjs';
+test('server errors on comment POST remain uncertain, while explicit 4xx Graph errors are rejected',async()=>{
+ for(const [status,rejected] of [[502,false],[400,true]]){
+  const meta=new Meta({version:'v99.0',fetcher:async()=>({ok:false,status,json:async()=>({error:{code:200}})})});
+  await assert.rejects(meta.request('1_10/comments','token',{message:'Test'}),error=>error.metaRejected===rejected);
+ }
+});
 test('upload sends exact HTTP content length and preserves only safe error codes',async()=>{
  const meta=new Meta({version:'v99.0',fetcher:async(url,options)=>{
   assert.equal(options.headers['Content-Length'],'5');

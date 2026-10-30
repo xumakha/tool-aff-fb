@@ -21,6 +21,7 @@ app.whenReady().then(async()=>{
 
  require('./shopee.cjs').install(worker,()=>window);
  worker.on('message',message=>{if(message.type==='reveal-affiliate-master'&&message.path===path.resolve(config.AFFILIATE_MASTER_DIR,'Tong-hop-affiliate.xlsx'))shell.showItemInFolder(message.path);});
+ worker.on('message',message=>{if(message.type==='reveal-shopee-export'&&typeof message.path==='string'&&path.isAbsolute(message.path)&&path.basename(message.path)==='Shopee Affiliate.xlsx'&&existsSync(message.path))shell.showItemInFolder(message.path);});
  blocker=powerSaveBlocker.start('prevent-app-suspension');
  window=new BrowserWindow({width:1380,height:930,minWidth:850,minHeight:650,title:'Reels Desk PC',backgroundColor:'#f6f8f7',webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true}});
  const editConfig=()=>{if(process.platform==='win32'){const editor=spawn('notepad.exe',[envPath],{detached:true,stdio:'ignore'});editor.on('error',()=>dialog.showErrorBox('Mở cấu hình',`Mở file này bằng trình soạn thảo: ${envPath}`));editor.unref();}else shell.openPath(envPath);};

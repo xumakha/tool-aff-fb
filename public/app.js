@@ -1,4 +1,6 @@
 import {createQuickScheduler} from './quick.js';
+import {installMasterTabs} from './master-tabs.js';
+installMasterTabs();
 const $=id=>document.getElementById(id);
 const labels={queued:'Chờ đăng',running:'Đang upload',processing:'Meta đang xử lý',published:'Đã xuất bản',review:'Cần kiểm tra',cancelled:'Đã hủy',remote_queued:'Chờ tải lên Meta',remote_uploading:'Đang tải lên Meta',remote_confirming:'Meta xác nhận lịch',remote_scheduled:'Meta đã nhận lịch'};
 const esc=value=>String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -87,6 +89,12 @@ let automaticSourceCount=0,automaticSourcesBusy=false;
 $('affiliate').querySelector('h2').nextElementSibling.textContent='Video Shopee tự lưu link gốc và tên sản phẩm. Chỉ cần tải file chứa link gốc + affiliate lên; app tự ghép khi nhận diện được các cột.';
 $('shopee-form').querySelector('p').textContent='Chọn thư mục lưu video. Mỗi lượt tự tạo thư mục Excel Shopee chứa Ten va Link SP.xlsx (link + tên) và Shopee Affiliate.xlsx (mẫu 6 cột để upload Shopee). Dữ liệu sản phẩm tự nhập vào tool.';
 $('affiliate-video').insertAdjacentHTML('beforebegin','<p id="affiliate-auto-source" role="status"></p><label><input type="checkbox" id="affiliate-manual-source"> Dùng Excel video cũ thay cho dữ liệu tự lưu</label>');
+$('affiliate-auto-source').insertAdjacentHTML('beforebegin','<div><button type="button" class="secondary" id="shopee-export-folder">Mở thư mục file link sản phẩm</button><p>Chọn file Shopee Affiliate.xlsx trong thư mục vừa mở để upload lên Shopee lấy link affiliate. Nút mở file của lượt tải gần nhất.</p></div>');
+$('shopee-export-folder').onclick=async()=>{
+ const button=$('shopee-export-folder');button.disabled=true;
+ try{await request('/api/shopee/export/location',{method:'POST'});toast('Đã mở thư mục và chọn Shopee Affiliate.xlsx để bạn upload lên Shopee.');}
+ catch(error){toast(error.message);}finally{button.disabled=false;}
+};
 $('affiliate-video').hidden=true;
 $('affiliate-manual-source').onchange=()=>{$('affiliate-video').hidden=!$('affiliate-manual-source').checked;affiliateReady();};
 async function refreshAffiliateSources(){try{const s=await request('/api/affiliate/sources');automaticSourceCount=s.count;automaticSourcesBusy=s.running;$('affiliate-auto-source').textContent=s.count?`Đã tự lưu ${s.count} video/sản phẩm. Không cần tải lại Excel video.`:'Chưa có dữ liệu tự lưu. Tải video shop hoặc chọn dùng Excel video cũ.';affiliateReady();}catch(e){$('affiliate-auto-source').textContent=e.message;}}

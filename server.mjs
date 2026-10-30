@@ -3,9 +3,10 @@ import http from 'node:http';
 import {fileURLToPath} from 'node:url';
 import {DatabaseSync} from 'node:sqlite';
 import {mkdirSync,readFileSync,createReadStream,existsSync} from 'node:fs';
-import {resolve} from 'node:path';
+import {resolve,dirname,basename,isAbsolute} from 'node:path';
 import {randomBytes,createCipheriv,createDecipheriv,timingSafeEqual} from 'node:crypto';
 import {Meta} from './meta.mjs';
+import {createCommentService} from './affiliate-comments.mjs';
 import {scanFolder, pickFolder, checkUnchanged, selectVideos} from './local-media.mjs';
 if (process.env.HOST && !['127.0.0.1','localhost','::1'].includes(process.env.HOST)) throw new Error('Bản PC chỉ lắng nghe localhost');
 const root = process.env.DATA_DIR || 'data'; mkdirSync(root,{recursive:true});
@@ -49,10 +50,15 @@ function crypt(value, decrypt=false) {
  if (decrypt) {const [iv,tag,data]=value.split('.').map(x=>Buffer.from(x,'hex')); const c=createDecipheriv('aes-256-gcm',key,iv);c.setAuthTag(tag);return Buffer.concat([c.update(data),c.final()]).toString();}
  const iv=randomBytes(12),c=createCipheriv('aes-256-gcm',key,iv); const data=Buffer.concat([c.update(value),c.final()]); return [iv,c.getAuthTag(),data].map(x=>x.toString('hex')).join('.');
 }
+const commentService=createCommentService({db,meta,masterFile:resolve(process.env.AFFILIATE_MASTER_DIR||root,'Tong-hop-affiliate.xlsx'),getPage:id=>{const page=db.prepare('SELECT * FROM pages WHERE id=?').get(id);return page?{id:page.id,name:page.name,token:crypt(page.token,true)}:null;}});
 let shopeeState={running:false,message:'Chỉ hỗ trợ bản desktop Electron',downloaded:0};
 let shopeeImports=0;
 process.on('message',async message=>{
- if(message.type==='shopee-state')shopeeState=message.state;
+ if(message.type==='shopee-state'){
+  shopeeState=message.state;
+  const file=message.state.affiliateExcelPath;
+  if(typeof file==='string'&&isAbsolute(file)&&basename(file)==='Shopee Affiliate.xlsx')db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run('shopee_affiliate_export',file);
+ }
  if(message.type==='shopee-file'){shopeeImports++;try{
   const {files}=await selectVideos([message.path]);for(const file of files){
    if(message.url)db.prepare('INSERT INTO shopee_sources(path,url,name) VALUES(?,?,?) ON CONFLICT(path) DO UPDATE SET url=excluded.url,name=excluded.name').run(file.path,message.url,typeof message.productName==='string'&&message.productName.trim()?message.productName.trim():file.name.replace(/\.mp4$/i,''));
@@ -72,14 +78,14 @@ const server=http.createServer(async(req,res)=>{try{
  const allowedHosts=new Set(['localhost','127.0.0.1','[::1]',new URL(base).hostname]);
  if(!allowedHosts.has(new URL(`http://${req.headers.host}`).hostname))return json(res,403,{error:'Host không hợp lệ'});
  if(req.method!=='GET' && req.headers['sec-fetch-site']==='cross-site')return json(res,403,{error:'Yêu cầu từ website khác bị chặn'});
- const allowedOrigins=new Set([new URL(base).origin]);if(process.env.DESKTOP_MODE==='1'){allowedOrigins.add(`http://localhost:${process.env.PORT}`);allowedOrigins.add(`http://127.0.0.1:${process.env.PORT}`);}
+ const allowedOrigins=new Set([new URL(base).origin]);if(process.env.DESKTOP_MODE==='1'){const port=server.address()?.port||process.env.PORT;allowedOrigins.add(`http://localhost:${port}`);allowedOrigins.add(`http://127.0.0.1:${port}`);}
  if(req.method!=='GET' && req.headers.origin && !allowedOrigins.has(req.headers.origin))return json(res,403,{error:'Origin không hợp lệ'});
  if(req.method==='GET' && url.pathname==='/api/state')return json(res,200,{configured:config(),pages:db.prepare('SELECT id,name FROM pages').all(),media:db.prepare('SELECT * FROM media WHERE COALESCE(hidden,0)=0').all(),jobs:db.prepare('SELECT jobs.*,pages.name AS page_name,media.name AS media_name FROM jobs LEFT JOIN pages ON pages.id=jobs.page_id LEFT JOIN media ON media.id=jobs.media_id WHERE COALESCE(jobs.history_hidden,0)=0 ORDER BY due DESC').all()});
  if(url.pathname==='/auth/meta' && req.method==='GET'){
   if(!config())return json(res,400,{error:'Cần cấu hình Meta App, phiên bản API và khóa mã hóa trong .env'});
   const state=randomBytes(32).toString('hex');states.set(state,Date.now()+600000);for(const [k,v] of states)if(v<Date.now())states.delete(k);
   res.setHeader('Set-Cookie',`meta_state=${state}; HttpOnly; SameSite=Lax; Path=/auth; Max-Age=600${base.startsWith('https:')?'; Secure':''}`);
-  const target=new URL(`https://www.facebook.com/${process.env.META_GRAPH_VERSION}/dialog/oauth`);target.search=new URLSearchParams({client_id:process.env.META_APP_ID,redirect_uri:`${base}/auth/callback`,state,scope:'pages_show_list,pages_read_engagement,pages_manage_posts'});res.writeHead(302,{Location:target.href});return res.end();
+  const target=new URL(`https://www.facebook.com/${process.env.META_GRAPH_VERSION}/dialog/oauth`);target.search=new URLSearchParams({client_id:process.env.META_APP_ID,redirect_uri:`${base}/auth/callback`,state,scope:'pages_show_list,pages_read_engagement,pages_manage_posts,pages_manage_engagement,pages_read_user_content'});res.writeHead(302,{Location:target.href});return res.end();
  }
  if(url.pathname==='/auth/callback' && req.method==='GET'){
   const state=url.searchParams.get('state');const cookie=(req.headers.cookie || '').split('; ').find(x=>x.startsWith('meta_state='))?.slice(11);
@@ -91,6 +97,23 @@ const server=http.createServer(async(req,res)=>{try{
   res.writeHead(302,{Location:'/', 'Set-Cookie':'meta_state=; HttpOnly; SameSite=Lax; Path=/auth; Max-Age=0'});return res.end();
  }
  if(url.pathname==='/api/affiliate/master' && req.method==='GET')return json(res,200,{path:await masterPath()});
+ if(url.pathname==='/api/affiliate-comments' && req.method==='GET')return json(res,200,commentService.snapshot(url.searchParams.get('id'),url.searchParams.get('offset')));
+ if(url.pathname==='/api/affiliate-comments/scan' && req.method==='POST'){
+  if(!config())throw Error('Cấu hình Meta chưa đầy đủ.');
+  return json(res,202,await commentService.scan(JSON.parse(await body(req))));
+ }
+ if(url.pathname==='/api/affiliate-comments/start' && req.method==='POST'){
+  if(!config())throw Error('Cấu hình Meta chưa đầy đủ.');
+  return json(res,202,await commentService.start(JSON.parse(await body(req))));
+ }
+ if(url.pathname==='/api/affiliate-comments/stop' && req.method==='POST')return json(res,200,commentService.stop(JSON.parse(await body(req)).runId));
+ if(url.pathname==='/api/affiliate/master/view' && req.method==='GET'){
+  const file=resolve(process.env.AFFILIATE_MASTER_DIR||root,'Tong-hop-affiliate.xlsx');
+  const q=url.searchParams.get('q')||'';if(q.length>300)throw Error('Từ khóa tìm kiếm tối đa 300 ký tự.');
+  const {readMasterTable}=await import('./master-view.mjs');
+  try{return json(res,200,await readMasterTable(file,{q,page:url.searchParams.get('page')||1}));}
+  catch(error){if(error.code==='ENOENT')throw Error('Chưa có file tổng. Hãy ghép link Shopee Affiliate ở tab Ứng dụng trước.');if(['EACCES','EPERM','EBUSY'].includes(error.code))throw Error('Không đọc được file tổng. Hãy đóng file trong Excel rồi bấm Làm mới.');throw error;}
+ }
  if(url.pathname==='/api/affiliate/master/location' && req.method==='POST'){
   const file=await masterPath();
   if(process.env.DESKTOP_MODE==='1'&&process.connected){
@@ -120,6 +143,22 @@ const server=http.createServer(async(req,res)=>{try{
   delete result.matchedRows;return json(res,200,result);
  }
  if(url.pathname==='/api/shopee' && req.method==='GET')return json(res,200,shopeeState);
+ if(url.pathname==='/api/shopee/export/location' && req.method==='POST'){
+  if(shopeeState.running||shopeeImports)throw Error('Đợi lượt tải Shopee kết thúc để lấy file link đầy đủ.');
+  const {findExport}=await import('./desktop/shopee-export-location.cjs');
+  const saved=db.prepare("SELECT value FROM settings WHERE key='shopee_affiliate_export'").get()?.value;
+  const folders=db.prepare('SELECT path FROM shopee_sources ORDER BY rowid DESC').all().map(row=>dirname(row.path));
+  const file=await findExport(saved,folders);
+  if(!file)throw Error('Chưa tìm thấy Shopee Affiliate.xlsx. Hãy tải video shop Shopee trước; nếu đã di chuyển file, mở thư mục đã chuyển tới.');
+  db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run('shopee_affiliate_export',file);
+  if(process.env.DESKTOP_MODE==='1'&&process.connected){
+   await new Promise((resolve,reject)=>process.send({type:'reveal-shopee-export',path:file},error=>error?reject(error):resolve()));
+  }else if(process.platform==='win32'){
+   const {spawn}=await import('node:child_process');
+   await new Promise((resolve,reject)=>{const child=spawn('explorer.exe',['/select,',file],{stdio:'ignore',windowsHide:true});child.once('error',reject);child.once('spawn',()=>{child.unref();resolve();});});
+  }else throw Error('Mở vị trí file được hỗ trợ trên bản desktop hoặc Windows.');
+  return json(res,200,{path:file});
+ }
  if(url.pathname==='/api/shopee' && req.method==='POST'){
   if(process.env.DESKTOP_MODE!=='1'||!process.send)throw Error('Mở bản desktop Electron để tải Shopee');
   if(shopeeState.running)return json(res,409,{error:'Đang có lượt tải Shopee'});
@@ -241,7 +280,7 @@ const server=http.createServer(async(req,res)=>{try{
  if(url.pathname.startsWith('/api/jobs/') && req.method==='DELETE'){
   const result=db.prepare("UPDATE jobs SET status='cancelled' WHERE id=? AND status IN ('queued','remote_queued')").run(url.pathname.split('/').pop());return json(res,result.changes?200:409,{ok:!!result.changes});
  }
- if(req.method==='GET' && ['/', '/app.js','/quick.js','/style.css'].includes(url.pathname)){const file=url.pathname==='/'?'index.html':url.pathname.slice(1);res.writeHead(200,{'Content-Type':file.endsWith('.html')?'text/html; charset=utf-8':file.endsWith('.js')?'text/javascript':'text/css','Content-Security-Policy':"default-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",'X-Content-Type-Options':'nosniff'});return res.end(readFileSync(fileURLToPath(new URL(`./public/${file}`,import.meta.url))));}
+ if(req.method==='GET' && ['/', '/app.js','/quick.js','/style.css','/master-tabs.js','/master-view.html','/master-view.js','/master-view.css','/affiliate-comments.html','/affiliate-comments.js','/affiliate-comments.css'].includes(url.pathname)){const file=url.pathname==='/'?'index.html':url.pathname.slice(1);res.writeHead(200,{'Content-Type':file.endsWith('.html')?'text/html; charset=utf-8':file.endsWith('.js')?'text/javascript':'text/css','Content-Security-Policy':`default-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors ${['master-view.html','affiliate-comments.html'].includes(file)?"'self'":"'none'"}; base-uri 'self'; form-action 'self'`,'X-Content-Type-Options':'nosniff'});return res.end(readFileSync(fileURLToPath(new URL(`./public/${file}`,import.meta.url))));}
  json(res,404,{error:'Không tìm thấy'});
  }catch(error){json(res,400,{error:error.message});}});
 let busy=false;

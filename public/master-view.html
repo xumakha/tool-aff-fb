@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>File tổng · Chỉ xem</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/master-view.css"></head>
+<body class="master-view"><main>
+<div class="card-title"><div><h1>Dữ liệu file tổng</h1><p>Chỉ xem và tìm kiếm. Dữ liệu trong Excel không bị thay đổi.</p></div><button type="button" id="reload" class="secondary">↻ Làm mới</button></div>
+<p id="file-path" class="file-path"></p>
+<form id="search-form"><label for="query">Tìm tên sản phẩm, link hoặc nội dung</label><div class="search-row"><input id="query" type="search" maxlength="300" placeholder="Nhập từ khóa, có thể tìm không dấu"><button type="submit">Tìm kiếm</button><button type="button" id="clear" class="secondary">Xóa tìm kiếm</button></div></form>
+<p id="status" role="status" aria-live="polite">Đang đọc file tổng…</p><p id="error" role="alert" hidden></p>
+<div class="table-wrap" tabindex="0" aria-label="Dữ liệu file tổng"><table><thead><tr id="columns"><th scope="col">Dòng Excel</th></tr></thead><tbody id="rows"></tbody></table></div>
+<div class="pagination"><button type="button" id="previous" class="secondary" disabled>← Trang trước</button><span id="page-status"></span><button type="button" id="next" class="secondary" disabled>Trang sau →</button></div>
+</main><script type="module" src="/master-view.js"></script></body></html>

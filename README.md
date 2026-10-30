@@ -105,7 +105,21 @@ Tool cuộn trang, thử chuyển trang và gom link sản phẩm, nhận diện
 
 Đây là tính năng thử nghiệm, **chưa xác minh tải thành công với shop thật**. Kiểm tra trực tiếp hai link lỗi ngày 29/10/2026 bằng phiên mới bị Shopee chuyển đến `/verify/traffic/error` (API error `90309999`), nên vẫn cần kiểm chứng bằng phiên đã đăng nhập của người dùng. Shopee có thể đổi DOM, yêu cầu đăng nhập, chặn trình duyệt hoặc chỉ tải video sau tương tác; nguồn blob/HLS không có MP4 trực tiếp chưa được hỗ trợ. Không cam kết lấy đủ toàn bộ video. Giới hạn mỗi lượt: 100 trang, 60 lần cuộn/trang và 1 GB/video; video không tìm được nguồn sẽ được bỏ qua, lỗi tải được hiển thị trong giao diện. Bản `npm start` không có cửa sổ Shopee; dùng `npm run desktop` sau khi cài dependencies hoặc build lại `.exe` để dùng chức năng này.
 
+## Bình luận affiliate trên bài Page đã đăng (thử nghiệm)
+
+Tab **Bình luận affiliate** hoạt động độc lập với tab Ứng dụng và tab File tổng. Chọn Page đã kết nối, nhập số bài tối đa cần quét (1–5.000, mặc định 100), rồi bấm **Quét và đối chiếu**. Quét chỉ đọc dữ liệu; chưa gửi bình luận. Bảng hiển thị caption, tên sản phẩm/dòng Excel, nguyên văn cột **Nội dung**, trạng thái và lý do bỏ qua. Chỉ các dòng đủ điều kiện mới chọn được. Bấm **Đăng bình luận đã chọn**, kiểm tra số bài và tên Page trong xác nhận để gửi. Nên thử một bài trước; không cần chọn toàn bộ bảng. Giữ app mở, dùng **Dừng** để dừng sau yêu cầu Meta đang xử lý.
+
+Đối chiếu theo toàn bộ caption hoặc dòng tên sản phẩm ở đầu; có thể bỏ phần đuôi chỉ gồm URL/hashtag. Chuẩn hóa Unicode, khoảng trắng và chữ hoa/thường, giữ dấu tiếng Việt; không tìm gần đúng bằng tên chứa một phần. Tên trùng nhưng link/nội dung khác nhau sẽ báo khớp nhiều dòng. Cột D phải chứa link affiliate hợp lệ ở cột C. File Excel tổng chỉ được đọc; nếu file đổi sau khi xem trước, phải quét lại.
+
+Tool kiểm tra bình luận theo **ID Page**, bao gồm các trang bình luận và luồng trả lời; bình luận của người khác không chặn bài. Bài đã có bất kỳ bình luận/trả lời nào của Page đều bị bỏ qua. Trước mỗi lần gửi, tool đọc lại bài và bình luận để tránh trường hợp Page đã bình luận sau lượt quét. Nếu thiếu tác giả, thiếu trang dữ liệu hoặc API lỗi, bài được báo chưa kiểm tra chắc chắn và không gửi. Từng bài có lịch sử theo cặp Page ID/bài ID trong SQLite; trường hợp đang gửi mà app dừng/mất phản hồi sẽ cần kiểm tra Facebook, không tự gửi lại. Lỗi gửi làm dừng lượt, không tự thử lại POST.
+
+Kết nối Facebook yêu cầu thêm `pages_manage_engagement` và `pages_read_user_content` bên cạnh các quyền đăng bài hiện có. Token cấp trước khi thêm quyền có thể cần kết nối lại. Quét dùng `published_posts` và `comments` theo các edge trong [SDK chính thức của Meta](https://github.com/facebook/facebook-python-business-sdk/blob/main/facebook_business/adobjects/post.py). Chỉ xử lý các bài API trả về; chưa xác minh độ bao phủ Reels/bài cũ và quyền thực tế trên Page thật. Kiểm thử hiện dùng dữ liệu/API giả lập, chưa đăng bình luận thật lên Facebook. Khoảng cách giữa các bình luận chọn được từ 5–300 giây.
+
 ## Ghép link Shopee Affiliate vào Excel tổng hợp cố định
+
+Tab **File tổng · Chỉ xem** ở đầu ứng dụng hiển thị dữ liệu trang `sheet 1` trong `Tong-hop-affiliate.xlsx`: Liên kết gốc, Tên sản phẩm, Link affiliate, Nội dung. Tìm kiếm trên cả bốn cột bằng nút **Tìm kiếm** hoặc Enter; hỗ trợ tiếng Việt không dấu, phân trang 100 dòng và **Làm mới** sau khi file thay đổi. Tab này chỉ đọc, không tạo/sửa/lưu file Excel và không có thao tác chỉnh sửa ô. Chuyển qua lại tab **Ứng dụng** giữ nội dung đang nhập và tiến trình đang chạy.
+
+Nút **Mở thư mục file link sản phẩm** trong mục **Ghép link Shopee Affiliate** mở thư mục và chọn sẵn `Shopee Affiliate.xlsx` của lượt tải gần nhất để upload lên Shopee lấy link affiliate. App nhớ vị trí qua các lần mở; khi nâng cấp từ bản cũ, app tìm file xuất trong các thư mục video đã tải. Đợi lượt tải kết thúc để lấy file đầy đủ. Nếu file đã bị di chuyển/xóa, app báo không tìm thấy thay vì mở nhầm file Excel tổng.
 
 Sau khi tải video và có file đối chiếu từ Shopee, mở **Ghép link Shopee Affiliate**:
 

@@ -1,0 +1,42 @@
+// Actual browser + HTTP + SQLite integration. Meta requests are replaced by a
+// mock imported into the worker. No real Page token or comment is used.
+const {app,BrowserWindow}=require('electron');
+const {spawn}=require('node:child_process');
+const {once}=require('node:events');
+const {mkdtemp,readFile,rm}=require('node:fs/promises');
+const {randomBytes,createCipheriv}=require('node:crypto');
+const {DatabaseSync}=require('node:sqlite');
+const {pathToFileURL}=require('node:url');
+const path=require('node:path');
+const {tmpdir}=require('node:os');
+const assert=require('node:assert/strict');
+const ExcelJS=require('exceljs');
+let folder,worker,win,exitCode=0;
+app.on('window-all-closed',()=>{});
+async function until(script){for(let i=0;i<200;i++){if(await win.webContents.executeJavaScript(script))return;await new Promise(resolve=>setTimeout(resolve,50));}const detail=await win.webContents.executeJavaScript(`document.getElementById('comments-frame')?.contentDocument?.getElementById('error')?.textContent`);throw Error('Timed out waiting for comment UI: '+detail);}
+(async()=>{
+ folder=await mkdtemp(path.join(tmpdir(),'affiliate-comments-ui-'));app.setPath('userData',path.join(folder,'browser'));await app.whenReady();
+ const file=path.join(folder,'Tong-hop-affiliate.xlsx'),log=path.join(folder,'comments.log');
+ const message='Đèn ngủ\nhttps://s.shopee.vn/lamp',book=new ExcelJS.Workbook(),sheet=book.addWorksheet('sheet 1');sheet.addRow(['Liên kết gốc','Tên sản phẩm','Link affiliate','Nội dung']);sheet.addRow(['https://shopee.vn/product/1/2','Đèn ngủ','https://s.shopee.vn/lamp',message]);await book.xlsx.writeFile(file);const before=await readFile(file);
+ const key=randomBytes(32),iv=randomBytes(12),cipher=createCipheriv('aes-256-gcm',key,iv),encrypted=Buffer.concat([cipher.update('fake-page-token'),cipher.final()]);
+ const token=[iv,cipher.getAuthTag(),encrypted].map(value=>value.toString('hex')).join('.');
+ worker=spawn(process.execPath,['--import',pathToFileURL(path.join(__dirname,'mock-comment-meta.mjs')).href,path.join(__dirname,'../server.mjs')],{env:{...process.env,ELECTRON_RUN_AS_NODE:'1',DATA_DIR:folder,AFFILIATE_MASTER_DIR:folder,PORT:'0',HOST:'127.0.0.1',ADMIN_PASSWORD:'',META_APP_ID:'fake',META_APP_SECRET:'fake',META_GRAPH_VERSION:'v99.0',TOKEN_ENCRYPTION_KEY:key.toString('hex'),MOCK_COMMENT_LOG:log,DESKTOP_MODE:'1'},stdio:['ignore','ignore','pipe','ipc'],windowsHide:true});
+ const ready=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Server startup timeout')),10000);worker.once('error',reject);worker.on('message',message=>{if(message.type==='ready'){clearTimeout(timer);resolve(message);}});});
+ const db=new DatabaseSync(path.join(folder,'reels.sqlite'));db.prepare('INSERT INTO pages VALUES(?,?,?)').run('1','Page thử nghiệm',token);db.close();
+ win=new BrowserWindow({show:false,webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true}});await win.loadURL(`http://127.0.0.1:${ready.port}`);
+ await until(`!!document.getElementById('comments-tab')&&!!document.getElementById('shopee-url')`);
+ await win.webContents.executeJavaScript(`document.getElementById('shopee-url').value='keep-draft';document.getElementById('comments-tab').click();true;`);
+ const doc=`document.getElementById('comments-frame').contentDocument`;
+ await until(`!!${doc}?.querySelector('#page option[value="1"]')`);
+ await win.webContents.executeJavaScript(`{const d=${doc};d.getElementById('page').value='1';d.getElementById('scan-form').requestSubmit();}true;`);
+ await until(`${doc}.getElementById('run-message').textContent.includes('Đã quét 3 bài')`);
+ assert.ok(await win.webContents.executeJavaScript(`${doc}.getElementById('summary').textContent.includes('Đủ điều kiện: 1')`));
+ assert.equal(await win.webContents.executeJavaScript(`${doc}.querySelectorAll('#items input:not(:disabled)').length`),1);
+ await assert.rejects(readFile(log),{code:'ENOENT'});
+ await win.webContents.executeJavaScript(`{const d=${doc};d.defaultView.confirm=()=>true;d.getElementById('select-page').click();d.getElementById('start').click();}true;`);
+ await until(`${doc}.getElementById('summary').textContent.includes('Đã bình luận: 1')`);
+ const writes=(await readFile(log,'utf8')).trim().split('\n').map(JSON.parse);assert.deepEqual(writes,[{postId:'1_10',message}]);
+ await win.webContents.executeJavaScript(`document.getElementById('studio-tab').click();true;`);assert.equal(await win.webContents.executeJavaScript(`document.getElementById('shopee-url').value`),'keep-draft');
+ assert.deepEqual(await readFile(file),before);
+ console.log('PASS: comment tab -> Page selection -> scan -> preview -> explicit send; only eligible post commented through mock, Excel/draft preserved');
+})().catch(error=>{console.error(error);exitCode=1;}).finally(async()=>{win?.destroy();if(worker&&worker.exitCode===null){const ended=once(worker,'exit');worker.kill();await ended;}if(folder)await rm(folder,{recursive:true,force:true}).catch(()=>{});app.exit(exitCode);});
