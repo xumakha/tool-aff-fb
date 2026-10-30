@@ -5,7 +5,16 @@ import {mkdtemp,readFile,rm,appendFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import ExcelJS from 'exceljs';
-import {matchProduct,CommentGraph,createCommentService} from '../affiliate-comments.mjs';
+import {matchProduct,CommentGraph,createCommentService,randomCommentInterval} from '../affiliate-comments.mjs';
+
+test('comment intervals vary independently within ten seconds and keep a five-second minimum',()=>{
+ assert.equal(randomCommentInterval(60,()=>0),50);
+ assert.equal(randomCommentInterval(60,()=>0.5),60);
+ assert.equal(randomCommentInterval(60,()=>0.999999),70);
+ assert.equal(randomCommentInterval(5,()=>0),5);
+ assert.equal(randomCommentInterval(5,()=>0.999999),15);
+ assert.equal(randomCommentInterval(300,()=>0.999999),310);
+});
 
 const message='Đèn ngủ\nhttps://s.shopee.vn/lamp';
 const product={row:2,cells:['https://shopee.vn/product/1/2','Đèn ngủ','https://s.shopee.vn/lamp',message]};
@@ -77,6 +86,27 @@ test('select all returns eligible posts across table pages without posting',asyn
  const state=await settled(service,runId);
  assert.equal(state.items.length,100);assert.equal(service.snapshot(runId,100).items.length,5);
  assert.deepEqual(service.eligibleIds(runId),{runId,pageId:'1',postIds:model.posts.slice(3).map(item=>item.id)});
+ assert.equal(model.writes.length,0);
+}));
+
+test('scan takes only the newest requested posts across pages and retains their order including skipped posts',async()=>fixture(async({service,options,model})=>{
+ model.posts=Array.from({length:100},(_,i)=>({...post('1_'+(1000-i),i===0?'Không khớp':'Đèn ngủ'),created_time:new Date(Date.UTC(2026,9,20,0,-i)).toISOString()}));
+ model.comments[model.posts[1].id]=[{id:'1_80',from:{id:'1'},comment_count:0}];
+ const original=options.meta.request,requests=[];
+ options.meta.request=async(path,token,body)=>{
+  const url=new URL('https://graph.test/'+path);
+  if(url.pathname==='/1/published_posts'){
+   requests.push(url);assert.equal(url.searchParams.get('order'),'reverse_chronological');assert.equal(url.searchParams.get('limit'),'10');
+   const start=Number(url.searchParams.get('after')||0),end=start+4;
+   return {data:model.posts.slice(start,end),paging:{next:'more',cursors:{after:String(end)}}};
+  }
+  return original(path,token,body);
+ };
+ const {runId}=await service.scan({pageId:'1',limit:10}),state=await settled(service,runId);
+ assert.equal(requests.length,3);assert.equal(state.total,10);
+ assert.deepEqual(state.items.map(item=>item.post_id),model.posts.slice(0,10).map(item=>item.id));
+ assert.deepEqual(state.counts,{unmatched:1,already:1,eligible:8});
+ assert.ok(!model.reads.some(path=>path.startsWith(model.posts[10].id+'/')));
  assert.equal(model.writes.length,0);
 }));
 

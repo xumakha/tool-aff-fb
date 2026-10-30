@@ -8,8 +8,10 @@ function controls(){
  const active=!!snapshot?.activeId,samePage=$('page').value===snapshot?.run?.page_id;
  $('scan').disabled=busy||active;$('page').disabled=busy||active;$('scan-limit').disabled=busy||active;
  $('start').disabled=busy||active||!samePage||!selected.size||!['ready','done','stopped'].includes(snapshot?.run?.status);
- $('stop').disabled=busy||!active;$('select-page').disabled=busy||active||!samePage||!snapshot?.items.some(item=>item.status==='eligible');
+ $('stop').disabled=busy||!active;
  $('select-all').disabled=busy||active||!samePage||!snapshot?.counts.eligible||!['ready','done','stopped'].includes(snapshot?.run?.status);
+ $('select-all').checked=!!snapshot?.counts.eligible&&selected.size===snapshot.counts.eligible;
+ $('select-all').indeterminate=selected.size>0&&!$('select-all').checked;
  $('selection').textContent=`${selected.size} bài được chọn`;
 }
 async function pages(){try{const data=await request('/api/state'),previous=$('page').value;$('page').replaceChildren(new Option('Chọn Page',''));for(const page of data.pages)$('page').append(new Option(page.name,page.id));$('page').value=previous||snapshot?.run?.page_id||'';if(!data.pages.length)error(data.hiddenPages?.length?'Các Page đang được ẩn. Hiện lại Page ở tab Ứng dụng để sử dụng.':'Chưa có Page. Kết nối Facebook ở tab Ứng dụng trước.');else if($('error').textContent.includes('Các Page đang được ẩn.'))error('');if(snapshot)render(snapshot);else controls();}catch(e){error(e.message);}}
@@ -43,8 +45,8 @@ $('start').onclick=async()=>{
  busy=true;error('');controls();try{await request('/api/affiliate-comments/start',{runId,postIds:[...selected],confirmed:true,interval:Number($('interval').value)});selected.clear();await refresh();}catch(e){error(e.message);}finally{busy=false;controls();}
 };
 $('stop').onclick=async()=>{busy=true;controls();try{await request('/api/affiliate-comments/stop',{runId:snapshot.activeId});await refresh();}catch(e){error(e.message);}finally{busy=false;controls();}};
-$('select-page').onclick=()=>{for(const item of snapshot?.items||[])if(item.status==='eligible')selected.add(item.post_id);render(snapshot);};
-$('select-all').onclick=async()=>{
+$('select-all').onchange=async()=>{
+ if(!$('select-all').checked){selected.clear();render(snapshot);return;}
  const id=runId,pageId=$('page').value;busy=true;error('');controls();
  try{const data=await request('/api/affiliate-comments/eligible?'+new URLSearchParams({id}));if(runId!==id||$('page').value!==pageId||data.runId!==id||data.pageId!==pageId)return;selected.clear();for(const postId of data.postIds)selected.add(postId);render(snapshot);}
  catch(e){error(e.message);}finally{busy=false;controls();}

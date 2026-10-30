@@ -114,7 +114,7 @@ export function createCommentService({db,meta,getPage,masterFile,sleep=ms=>new P
   launch(id,async()=>{
    const book=await workbook();db.prepare('UPDATE affiliate_comment_runs SET master_hash=? WHERE id=?').run(book.hash,id);
    const graph=new CommentGraph(meta,page.token,{shouldStop:()=>stopped(id)}),seen=new Set();let count=0,truncated=false;
-   scanPosts:for await(const batch of graph.edge(page.id,'published_posts','id,message,from,is_published,permalink_url,created_time')){
+   scanPosts:for await(const batch of graph.edge(page.id,'published_posts','id,message,from,is_published,permalink_url,created_time',{params:{order:'reverse_chronological',limit:String(Math.min(limit,100))}})){
     for(const post of batch.data){
      graph.check();if(!validID(post.id)||seen.has(post.id))continue;seen.add(post.id);
      if(count>=limit){truncated=true;break scanPosts;}count++;
@@ -129,7 +129,7 @@ export function createCommentService({db,meta,getPage,masterFile,sleep=ms=>new P
      db.prepare('INSERT INTO affiliate_comment_items VALUES(?,?,?,?,?,?,?,?,?,?)').run(id,post.id,post.message||'',post.permalink_url||'',match.name||'',match.excelRow||null,match.message||'',status,reason,null);
      updateRun(id,'scanning',`Đã đối chiếu ${count} bài…`);
     }
-    if(count>=limit){truncated=!!batch.paging?.next;break;}
+    if(count>=limit){truncated=truncated||!!batch.paging?.next;break;}
    }
    updateRun(id,'ready',`Đã quét ${count} bài API trả về.${truncated?' Còn bài chưa quét; tăng giới hạn để xem thêm.':''} Chọn các bài đủ điều kiện để bình luận.`);
   });
@@ -178,7 +178,7 @@ export function createCommentService({db,meta,getPage,masterFile,sleep=ms=>new P
      updateRun(runId,status==='uncertain'?'review':'failed','Đã dừng: '+error.message);return;
     }
     updateRun(runId,'running',`Đã xử lý ${index+1}/${items.length} bài đã chọn.`);
-    if(index<items.length-1)for(let waited=0;waited<interval*1000;waited+=250){graph.check();await sleep(250);}
+    if(index<items.length-1){const delay=randomCommentInterval(interval)*1000;for(let waited=0;waited<delay;waited+=250){graph.check();await sleep(250);}}
    }
    updateRun(runId,'done','Đã xử lý xong các bài đã chọn.');
   });
@@ -187,3 +187,4 @@ export function createCommentService({db,meta,getPage,masterFile,sleep=ms=>new P
  function stop(id){if(active!==id)throw Error('Lượt này không còn chạy.');db.prepare('UPDATE affiliate_comment_runs SET stop_requested=1,status=?,message=? WHERE id=?').run('stopping','Sẽ dừng sau yêu cầu Meta đang xử lý.',id);return {ok:true};}
  return {scan,start,stop,snapshot,eligibleIds};
 }
+export function randomCommentInterval(interval,random=Math.random){return Math.max(5,interval+Math.floor(random()*21)-10);}

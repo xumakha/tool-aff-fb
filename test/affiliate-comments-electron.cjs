@@ -37,7 +37,8 @@ async function until(script){for(let i=0;i<200;i++){if(await win.webContents.exe
  await until(`${doc}.getElementById('selection').textContent==='1 bài được chọn'&&!${doc}.getElementById('start').disabled`);
  assert.equal(await win.webContents.executeJavaScript(`${doc}.querySelectorAll('#items input:checked').length`),1);
  await assert.rejects(readFile(log),{code:'ENOENT'});
- await win.webContents.executeJavaScript(`${doc}.getElementById('clear-selection').click();true;`);
+ assert.equal(await win.webContents.executeJavaScript(`${doc}.getElementById('select-all').checked`),true);
+ await win.webContents.executeJavaScript(`${doc}.getElementById('select-all').click();true;`);
  assert.equal(await win.webContents.executeJavaScript(`${doc}.querySelectorAll('#items input:checked').length`),0);
  await win.webContents.executeJavaScript(`${doc}.getElementById('select-all').click();true;`);
  await until(`!${doc}.getElementById('start').disabled`);
