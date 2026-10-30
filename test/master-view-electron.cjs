@@ -2,12 +2,13 @@
 const {app,BrowserWindow}=require('electron');
 const {spawn}=require('node:child_process');
 const {once}=require('node:events');
-const {mkdtemp,readFile,rm}=require('node:fs/promises');
+const {mkdtemp,readFile,writeFile,rm}=require('node:fs/promises');
 const path=require('node:path');
 const {tmpdir}=require('node:os');
 const assert=require('node:assert/strict');
 const ExcelJS=require('exceljs');
 let folder,worker,win,exitCode=0;
+app.on('window-all-closed',()=>{});
 async function until(script){for(let i=0;i<100;i++){if(await win.webContents.executeJavaScript(script))return;await new Promise(resolve=>setTimeout(resolve,50));}throw Error('UI did not reach expected state: '+script);}
 (async()=>{
  folder=await mkdtemp(path.join(tmpdir(),'master-view-ui-'));app.setPath('userData',path.join(folder,'browser'));await app.whenReady();
@@ -28,6 +29,24 @@ async function until(script){for(let i=0;i<100;i++){if(await win.webContents.exe
  await win.webContents.executeJavaScript(`document.getElementById('studio-tab').click();true;`);
  assert.equal(await win.webContents.executeJavaScript(`document.getElementById('shopee-url').value`),'https://shopee.vn/keep-my-draft');
  assert.equal(await win.webContents.executeJavaScript(`document.getElementById('master-panel').hidden`),true);
+ const video=path.join(folder,'Tên file rút gọn.mp4'),bytes=Buffer.alloc(24);bytes.write('ftyp',4);await writeFile(video,bytes);
+ const productName='Tên sản phẩm đầy đủ '.repeat(12).trim();
+ worker.send({type:'shopee-file',path:video,url:'https://shopee.vn/product/1/2',productName});
+ await until(`fetch('/api/state').then(r=>r.json()).then(data=>data.media.some(m=>m.product_name===${JSON.stringify(productName)}))`);
+ await win.webContents.executeJavaScript(`document.getElementById('refresh').click();true;`);
+ await until(`!!document.querySelector('#quick-rows textarea[data-field="caption"]')`);
+ await win.webContents.executeJavaScript(`document.getElementById('quick-names').click();true;`);
+ assert.equal(await win.webContents.executeJavaScript(`document.querySelector('#quick-rows textarea[data-field="caption"]').value`),productName);
+ for(let index=2;index<=4;index++){const extra=path.join(folder,`Video ${index}.mp4`);await writeFile(extra,bytes);worker.send({type:'shopee-file',path:extra,url:`https://shopee.vn/product/1/${index}`,productName:'Sản phẩm '+index});}
+ await until(`fetch('/api/state').then(r=>r.json()).then(data=>data.media.length===4)`);
+ await win.webContents.executeJavaScript(`document.getElementById('refresh').click();true;`);
+ await until(`document.querySelectorAll('#quick-rows tr[data-id]').length===4`);
+ await win.webContents.executeJavaScript(`window.savedRandom=Math.random;window.randomValues=[0,0.5,0.999999];Math.random=()=>window.randomValues.shift();document.getElementById('quick-start').value='2099-01-01T09:00';document.getElementById('quick-gap').value='60';document.getElementById('quick-spread').click();true;`);
+ const times=await win.webContents.executeJavaScript(`Array.from(document.querySelectorAll('#quick-rows input[data-field="due"]')).map(node=>Date.parse(node.value+':00+07:00'))`);
+ assert.equal(times[0],Date.parse('2099-01-01T09:00:00+07:00'));assert.deepEqual(times.slice(1).map((time,i)=>(time-times[i])/60000),[48,60,72]);
+ await win.webContents.executeJavaScript(`document.getElementById('quick-random').checked=false;document.getElementById('quick-random').dispatchEvent(new Event('change'));document.getElementById('quick-spread').click();Math.random=window.savedRandom;true;`);
+ const fixed=await win.webContents.executeJavaScript(`Array.from(document.querySelectorAll('#quick-rows input[data-field="due"]')).map(node=>Date.parse(node.value+':00+07:00'))`);
+ assert.deepEqual(fixed.slice(1).map((time,i)=>(time-fixed[i])/60000),[60,60,60]);
  assert.deepEqual(await readFile(file),before);
- console.log('PASS: isolated table tab, accent-insensitive search, safe text, preserved app draft and unchanged workbook');
+ console.log('PASS: isolated table, full title captions, randomized 48/60/72-minute preview, fixed schedule toggle, unchanged workbook');
 })().catch(error=>{console.error(error);exitCode=1;}).finally(async()=>{win?.destroy();if(worker){const stopped=once(worker,'exit');worker.kill();await stopped;}if(folder)await rm(folder,{recursive:true,force:true}).catch(()=>{});app.exit(exitCode);});

@@ -33,7 +33,15 @@ async function until(script){for(let i=0;i<200;i++){if(await win.webContents.exe
  assert.ok(await win.webContents.executeJavaScript(`${doc}.getElementById('summary').textContent.includes('Đủ điều kiện: 1')`));
  assert.equal(await win.webContents.executeJavaScript(`${doc}.querySelectorAll('#items input:not(:disabled)').length`),1);
  await assert.rejects(readFile(log),{code:'ENOENT'});
- await win.webContents.executeJavaScript(`{const d=${doc};d.defaultView.confirm=()=>true;d.getElementById('select-page').click();d.getElementById('start').click();}true;`);
+ await win.webContents.executeJavaScript(`${doc}.getElementById('select-all').click();true;`);
+ await until(`${doc}.getElementById('selection').textContent==='1 bài được chọn'&&!${doc}.getElementById('start').disabled`);
+ assert.equal(await win.webContents.executeJavaScript(`${doc}.querySelectorAll('#items input:checked').length`),1);
+ await assert.rejects(readFile(log),{code:'ENOENT'});
+ await win.webContents.executeJavaScript(`${doc}.getElementById('clear-selection').click();true;`);
+ assert.equal(await win.webContents.executeJavaScript(`${doc}.querySelectorAll('#items input:checked').length`),0);
+ await win.webContents.executeJavaScript(`${doc}.getElementById('select-all').click();true;`);
+ await until(`!${doc}.getElementById('start').disabled`);
+ await win.webContents.executeJavaScript(`{const d=${doc};d.defaultView.confirm=()=>true;d.getElementById('start').click();}true;`);
  await until(`${doc}.getElementById('summary').textContent.includes('Đã bình luận: 1')`);
  const writes=(await readFile(log,'utf8')).trim().split('\n').map(JSON.parse);assert.deepEqual(writes,[{postId:'1_10',message}]);
  await win.webContents.executeJavaScript(`document.getElementById('studio-tab').click();true;`);assert.equal(await win.webContents.executeJavaScript(`document.getElementById('shopee-url').value`),'keep-draft');

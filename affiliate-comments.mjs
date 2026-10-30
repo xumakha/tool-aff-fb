@@ -100,6 +100,12 @@ export function createCommentService({db,meta,getPage,masterFile,sleep=ms=>new P
   const items=db.prepare('SELECT * FROM affiliate_comment_items WHERE run_id=? ORDER BY rowid LIMIT 100 OFFSET ?').all(current.id,offset);
   const {master_hash,...safe}=current;return {run:safe,items,counts,total,offset,pageSize:100,activeId:active};
  }
+ function eligibleIds(id){
+  const current=run(id);
+  if(active||!current||!['ready','done','stopped'].includes(current.status))throw Error('Hãy đợi lượt quét hoàn tất trước khi chọn tất cả bài.');
+  credentials(current.page_id);
+  return {runId:id,pageId:current.page_id,postIds:db.prepare("SELECT post_id FROM affiliate_comment_items WHERE run_id=? AND status='eligible' ORDER BY rowid").all(id).map(item=>item.post_id)};
+ }
  async function scan({pageId,limit=100}){
   if(active)throw Error('Đang có lượt quét/bình luận. Hãy đợi hoặc dừng lượt hiện tại.');
   if(!Number.isInteger(limit)||limit<1||limit>5000)throw Error('Giới hạn quét từ 1 đến 5.000 bài.');
@@ -118,7 +124,7 @@ export function createCommentService({db,meta,getPage,masterFile,sleep=ms=>new P
      else if(String(post.from?.id||'')!==page.id||post.is_published===false){status='unknown';reason='Chưa xác nhận bài đã xuất bản bởi chính Page.';}
      else if(status==='eligible'){
       try{const checked=await graph.ownComment(post.id,page.id);if(checked.own){status='already';reason='Đã có bình luận hoặc trả lời của Page.';}else if(checked.unknown){status='unknown';reason='Có bình luận thiếu tác giả hoặc Meta chưa trả đủ dữ liệu.';}}
-      catch(error){if(error.stopped)throw error;status='unknown';reason=error.message;}
+      catch(error){if(error.stopped)throw error;status=error.requiredPermissions?.includes('pages_read_user_content')?'permission':'unknown';reason=error.message;}
      }
      db.prepare('INSERT INTO affiliate_comment_items VALUES(?,?,?,?,?,?,?,?,?,?)').run(id,post.id,post.message||'',post.permalink_url||'',match.name||'',match.excelRow||null,match.message||'',status,reason,null);
      updateRun(id,'scanning',`Đã đối chiếu ${count} bài…`);
@@ -155,7 +161,7 @@ export function createCommentService({db,meta,getPage,masterFile,sleep=ms=>new P
      const checked=await graph.ownComment(item.post_id,page.id);
      if(checked.own){updateItem(runId,item.post_id,'already','Page đã bình luận sau lượt quét; bỏ qua.');continue;}
      if(checked.unknown){updateItem(runId,item.post_id,'unknown','Chưa xác nhận đủ tác giả bình luận.');continue;}
-    }catch(error){if(error.stopped)throw error;updateItem(runId,item.post_id,'unknown',error.message);continue;}
+    }catch(error){if(error.stopped)throw error;updateItem(runId,item.post_id,error.requiredPermissions?.includes('pages_read_user_content')?'permission':'unknown',error.message);continue;}
     graph.check();
     db.prepare('INSERT INTO affiliate_comment_receipts VALUES(?,?,?,?,?,?) ON CONFLICT(page_id,post_id) DO UPDATE SET status=excluded.status,comment_id=NULL,message=excluded.message,updated=excluded.updated').run(page.id,item.post_id,'sending',null,item.message,now());
     updateItem(runId,item.post_id,'sending','Đang chờ Meta xác nhận…');
@@ -179,5 +185,5 @@ export function createCommentService({db,meta,getPage,masterFile,sleep=ms=>new P
   return {runId};
  }
  function stop(id){if(active!==id)throw Error('Lượt này không còn chạy.');db.prepare('UPDATE affiliate_comment_runs SET stop_requested=1,status=?,message=? WHERE id=?').run('stopping','Sẽ dừng sau yêu cầu Meta đang xử lý.',id);return {ok:true};}
- return {scan,start,stop,snapshot};
+ return {scan,start,stop,snapshot,eligibleIds};
 }

@@ -1,25 +1,12 @@
 import {createQuickScheduler} from './quick.js';
 import {installMasterTabs} from './master-tabs.js';
+import {createUploadProgress,jobStatus} from './upload-progress.js';
 installMasterTabs();
 const $=id=>document.getElementById(id);
-const labels={queued:'Chờ đăng',running:'Đang upload',processing:'Meta đang xử lý',published:'Đã xuất bản',review:'Cần kiểm tra',cancelled:'Đã hủy',remote_queued:'Chờ tải lên Meta',remote_uploading:'Đang tải lên Meta',remote_confirming:'Meta xác nhận lịch',remote_scheduled:'Meta đã nhận lịch'};
 const esc=value=>String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function toast(message){$('toast').textContent=message;$('toast').hidden=false;setTimeout(()=>$('toast').hidden=true,6500);}
 async function request(path,options){const res=await fetch(path,options);const result=await res.json();if(!res.ok)throw new Error(result.error || 'Yêu cầu thất bại');if(result.archiveWarnings?.length)alert(result.archiveWarnings.join('\n'));return result;}
-document.querySelector('.schedule').insertAdjacentHTML('beforebegin','<section id="upload-progress" class="card" hidden><div class="card-title"><h2>Tiến độ tải lên Meta</h2><span id="upload-total"></span><button type="button" id="upload-toggle" class="secondary" aria-expanded="true" aria-controls="upload-details">Thu gọn</button></div><div id="upload-details"><div id="upload-items"></div><p id="upload-message" role="status"></p></div></section>');
-$('upload-toggle').onclick=()=>{
- const details=$('upload-details'),button=$('upload-toggle');details.hidden=!details.hidden;
- button.setAttribute('aria-expanded',String(!details.hidden));button.textContent=details.hidden?'Mở rộng':'Thu gọn';
-};
-function renderProgress(jobs){
- const batchId=localStorage.getItem('activeRemoteBatch'),panel=$('upload-progress');
- const items=batchId?jobs.filter(j=>j.batch_id===batchId):[];panel.hidden=!items.length;if(!items.length)return;
- const confirmed=items.filter(j=>j.status==='remote_scheduled' || j.status==='published').length;
- const failed=items.filter(j=>j.status==='review').length;
- $('upload-total').textContent=`${confirmed}/${items.length} video Meta đã xác nhận`;
- $('upload-items').innerHTML=items.map(j=>`<div class="upload-item"><span>${esc(j.media_name)}</span><progress max="100" value="${Math.max(0,Math.min(100,Number(j.progress)||0))}"></progress><strong>${Math.max(0,Math.min(100,Number(j.progress)||0))}%</strong><small>${labels[j.status]||esc(j.status)}</small></div>`).join('');
- $('upload-message').textContent=failed?`${failed} video cần kiểm tra trên Facebook. Các video còn lại đã được xử lý riêng; chưa xác nhận toàn bộ lịch.`:confirmed===items.length?'Meta đã xác nhận toàn bộ video. Bạn có thể tắt app và máy. Kiểm tra lịch trong Meta Business Suite.':'Đang tải và xác nhận từng video với Meta. Giữ app và máy mở.';
-}
+const renderProgress=createUploadProgress(document.querySelector('.schedule'));
 let librarySignature='';
 const previewObserver=new IntersectionObserver(entries=>{for(const entry of entries){if(!entry.isIntersecting)continue;const video=entry.target;video.src=video.dataset.src;previewObserver.unobserve(video);}},{rootMargin:'150px'});
 function renderLibrary(media){
@@ -30,8 +17,11 @@ function renderLibrary(media){
 }
 async function load(){try{const data=await request('/api/state');$('notice').textContent=data.configured?'Đã cấu hình Meta. Kết nối Facebook để tải các Page bạn quản lý.':'Chưa kết nối Meta App. Bạn có thể nhập thư mục video; cấu hình .env trước khi kết nối Facebook và đăng bài thật.';
 $('count-pages').textContent=data.pages.length;for(const status of ['queued','published','review'])$('count-'+status).textContent=data.jobs.filter(x=>x.status===status).length;
-$('page-list').innerHTML=data.pages.length?data.pages.map(p=>`<div class="page-item">◎ ${esc(p.name)}<small>Page ID: ${esc(p.id)}</small></div>`).join(''):'<div class="empty">Chưa có Page được kết nối.</div>';
-$('jobs').innerHTML=data.jobs.length?data.jobs.map(j=>`<tr><td><strong>${esc(j.media_name)}</strong><small>${esc(j.caption || 'Không có caption')}</small>${j.error?`<small title="${esc(j.error)}">${esc(j.error)}</small>`:''}${j.video_id?`<small>Meta video ID: ${esc(j.video_id)}</small>`:''}</td><td>${esc(j.page_name)}</td><td>${new Intl.DateTimeFormat('vi-VN',{timeZone:'Asia/Ho_Chi_Minh',dateStyle:'short',timeStyle:'short'}).format(new Date(j.due))}</td><td><span class="status ${esc(j.status)}">${labels[j.status] || esc(j.status)}</span></td><td>${j.status==='review'?`<button class="secondary clear-review" data-id="${esc(j.id)}">Đã kiểm tra · Cho đăng lại</button>`:j.status==='queued'?`<button class="secondary cancel" data-id="${esc(j.id)}">Hủy</button>`:''}</td></tr>`).join(''):'<tr><td colspan="5" class="empty">Chưa có lịch đăng. Bắt đầu bằng việc kết nối Page và thêm video đầu tiên.</td></tr>';
+$('count-pages').nextElementSibling.textContent='Page đang sử dụng';
+$('page-list').innerHTML=data.pages.length?data.pages.map(p=>`<div class="page-item"><div>◎ ${esc(p.name)}<small>Page ID: ${esc(p.id)}</small></div><button type="button" class="secondary page-visibility" data-page-id="${esc(p.id)}" data-hidden="true" data-page-name="${esc(p.name)}">Ẩn Page</button></div>`).join(''):`<div class="empty">${data.hiddenPages?.length?'Tất cả Page đang được ẩn. Mở mục Page đã ẩn để khôi phục.':'Chưa có Page được kết nối.'}</div>`;
+$('hidden-page-count').textContent=String(data.hiddenPages?.length||0);
+$('hidden-page-list').innerHTML=data.hiddenPages?.length?data.hiddenPages.map(p=>`<div class="page-item"><div>◎ ${esc(p.name)}<small>Page ID: ${esc(p.id)}</small></div><button type="button" class="secondary page-visibility" data-page-id="${esc(p.id)}" data-hidden="false">Hiện lại</button></div>`).join(''):'<p>Chưa có Page nào bị ẩn.</p>';
+$('jobs').innerHTML=data.jobs.length?data.jobs.map(j=>`<tr><td><strong>${esc(j.media_name)}</strong><small>${esc(j.caption || 'Không có caption')}</small>${j.error?`<small title="${esc(j.error)}">${esc(j.error)}</small>`:''}${j.video_id?`<small>Meta video ID: ${esc(j.video_id)}</small>`:''}</td><td>${esc(j.page_name)}</td><td>${new Intl.DateTimeFormat('vi-VN',{timeZone:'Asia/Ho_Chi_Minh',dateStyle:'short',timeStyle:'short'}).format(new Date(j.due))}</td><td><span class="status ${esc(j.status)}">${esc(jobStatus(j))}</span></td><td>${j.status==='review'?`<button class="secondary clear-review" data-id="${esc(j.id)}">Đã kiểm tra · Cho đăng lại</button>`:j.status==='queued'?`<button class="secondary cancel" data-id="${esc(j.id)}">Hủy</button>`:''}</td></tr>`).join(''):'<tr><td colspan="5" class="empty">Chưa có lịch đăng. Bắt đầu bằng việc kết nối Page và thêm video đầu tiên.</td></tr>';
 renderProgress(data.jobs);
 renderLibrary(data.media);updateQuick(data);
 }catch(e){toast(e.message);}}
@@ -60,11 +50,23 @@ $('jobs').onclick=async event=>{
  catch(e){toast(e.message);}finally{button.disabled=false;}
 };
 const pagesCard=$('pages');
-const pagesDetails=document.createElement('details');pagesDetails.className='pages-details';
-const pagesSummary=document.createElement('summary');pagesSummary.innerHTML='<strong>Facebook Pages</strong><span class="pages-summary-hint">Bấm để xem và kết nối Page</span>';
+const pagesColumns=pagesCard.parentElement;
+$('studio-panel').prepend(pagesCard);pagesColumns.classList.add('single-column');
+const pagesNav=document.querySelector('aside nav a[href="#pages"]');pagesNav.parentElement.prepend(pagesNav);
+const pagesDetails=document.createElement('details');pagesDetails.className='pages-details';pagesDetails.open=true;
+const pagesSummary=document.createElement('summary');pagesSummary.innerHTML='<strong>1 · Kết nối Facebook Pages</strong><span class="pages-summary-hint">Bấm để thu gọn hoặc mở rộng</span>';
 const pagesContent=document.createElement('div');pagesContent.className='pages-content';
 for(const child of [...pagesCard.children])pagesContent.append(child);
 pagesDetails.append(pagesSummary,pagesContent);pagesCard.append(pagesDetails);
+$('page-list').insertAdjacentHTML('afterend','<details id="hidden-pages"><summary>Page đã ẩn (<span id="hidden-page-count">0</span>)</summary><p>Ẩn chỉ bỏ Page khỏi các ô chọn. Kết nối và lịch đã tạo vẫn được giữ.</p><div id="hidden-page-list"></div></details>');
+pagesCard.addEventListener('click',async event=>{
+ const button=event.target.closest('.page-visibility');if(!button)return;
+ const hidden=button.dataset.hidden==='true';
+ if(hidden&&!confirm(`Ẩn Page “${button.dataset.pageName}” khỏi danh sách sử dụng? Các lịch và tác vụ đã bắt đầu của Page vẫn tiếp tục.`))return;
+ button.disabled=true;
+ try{await request('/api/pages/visibility',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pageId:button.dataset.pageId,hidden})});await load();$('comments-frame')?.contentWindow?.postMessage({type:'pages-visibility-changed'},location.origin);toast(hidden?'Đã ẩn Page. Có thể khôi phục trong mục Page đã ẩn.':'Đã hiện lại Page trong các ô chọn.');}
+ catch(error){toast(error.message);}finally{button.disabled=false;}
+});
 const updateQuick=createQuickScheduler({request,toast,reload:load});
 $('refresh').insertAdjacentHTML('beforebegin','<button type="button" class="secondary" id="clear-history">Clear lịch sử</button>');
 $('clear-history').onclick=async()=>{

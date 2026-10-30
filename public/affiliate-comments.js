@@ -1,5 +1,5 @@
 const $=id=>document.getElementById(id);
-const labels={eligible:'Đủ điều kiện',already:'Page đã bình luận',unmatched:'Không khớp sản phẩm',ambiguous:'Khớp nhiều dòng',invalid:'Nội dung/link chưa hợp lệ',unknown:'Chưa kiểm tra chắc chắn',changed:'Bài đã thay đổi',sending:'Đang gửi',posted:'Đã bình luận',uncertain:'Cần kiểm tra Facebook',rejected:'Meta từ chối'};
+const labels={eligible:'Đủ điều kiện',already:'Page đã bình luận',unmatched:'Không khớp sản phẩm',ambiguous:'Khớp nhiều dòng',invalid:'Nội dung/link chưa hợp lệ',unknown:'Chưa kiểm tra chắc chắn',permission:'Thiếu quyền đọc bình luận',changed:'Bài đã thay đổi',sending:'Đang gửi',posted:'Đã bình luận',uncertain:'Cần kiểm tra Facebook',rejected:'Meta từ chối'};
 let runId=null,offset=0,snapshot=null,busy=false,fetching=false,refreshQueued=false;
 const selected=new Set();
 async function request(url,input){const response=await fetch(url,input===undefined?undefined:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(input)});const data=await response.json();if(!response.ok)throw Error(data.error||'Yêu cầu thất bại.');return data;}
@@ -9,12 +9,14 @@ function controls(){
  $('scan').disabled=busy||active;$('page').disabled=busy||active;$('scan-limit').disabled=busy||active;
  $('start').disabled=busy||active||!samePage||!selected.size||!['ready','done','stopped'].includes(snapshot?.run?.status);
  $('stop').disabled=busy||!active;$('select-page').disabled=busy||active||!samePage||!snapshot?.items.some(item=>item.status==='eligible');
+ $('select-all').disabled=busy||active||!samePage||!snapshot?.counts.eligible||!['ready','done','stopped'].includes(snapshot?.run?.status);
  $('selection').textContent=`${selected.size} bài được chọn`;
 }
-async function pages(){try{const data=await request('/api/state'),previous=$('page').value;$('page').replaceChildren(new Option('Chọn Page',''));for(const page of data.pages)$('page').append(new Option(page.name,page.id));$('page').value=previous||snapshot?.run?.page_id||'';if(!data.pages.length)error('Chưa có Page. Kết nối Facebook ở tab Ứng dụng trước.');if(snapshot)render(snapshot);else controls();}catch(e){error(e.message);}}
+async function pages(){try{const data=await request('/api/state'),previous=$('page').value;$('page').replaceChildren(new Option('Chọn Page',''));for(const page of data.pages)$('page').append(new Option(page.name,page.id));$('page').value=previous||snapshot?.run?.page_id||'';if(!data.pages.length)error(data.hiddenPages?.length?'Các Page đang được ẩn. Hiện lại Page ở tab Ứng dụng để sử dụng.':'Chưa có Page. Kết nối Facebook ở tab Ứng dụng trước.');else if($('error').textContent.includes('Các Page đang được ẩn.'))error('');if(snapshot)render(snapshot);else controls();}catch(e){error(e.message);}}
 function render(data){
  snapshot=data;if(data.run)runId=data.run.id;
  $('run-message').textContent=data.run?`${data.run.page_name} · ${data.run.message}`:'Chưa có lượt quét.';
+ if(data.counts.permission)$('run-message').textContent+='\nMeta đang từ chối đọc bình luận. Cấp pages_read_user_content, kết nối lại Facebook ở tab Ứng dụng rồi quét lại.';
  $('summary').textContent=Object.entries(data.counts).map(([key,count])=>`${labels[key]||key}: ${count}`).join(' · ');
  const fragment=document.createDocumentFragment();
  for(const item of data.items){
@@ -42,7 +44,13 @@ $('start').onclick=async()=>{
 };
 $('stop').onclick=async()=>{busy=true;controls();try{await request('/api/affiliate-comments/stop',{runId:snapshot.activeId});await refresh();}catch(e){error(e.message);}finally{busy=false;controls();}};
 $('select-page').onclick=()=>{for(const item of snapshot?.items||[])if(item.status==='eligible')selected.add(item.post_id);render(snapshot);};
+$('select-all').onclick=async()=>{
+ const id=runId,pageId=$('page').value;busy=true;error('');controls();
+ try{const data=await request('/api/affiliate-comments/eligible?'+new URLSearchParams({id}));if(runId!==id||$('page').value!==pageId||data.runId!==id||data.pageId!==pageId)return;selected.clear();for(const postId of data.postIds)selected.add(postId);render(snapshot);}
+ catch(e){error(e.message);}finally{busy=false;controls();}
+};
 $('clear-selection').onclick=()=>{selected.clear();if(snapshot)render(snapshot);};
 $('previous').onclick=()=>{offset=Math.max(0,offset-100);refresh();};$('next').onclick=()=>{offset+=100;refresh();};
 $('page').onchange=()=>{selected.clear();if(snapshot)render(snapshot);else controls();};$('refresh-pages').onclick=pages;
 await refresh();await pages();setInterval(refresh,2000);
+window.addEventListener('message',event=>{if(event.origin===location.origin&&event.source===parent&&event.data?.type==='pages-visibility-changed'){selected.clear();void pages();}});

@@ -29,6 +29,7 @@ try{
  assert.equal((await request('/api/shopee/export/location',{path:join(dir,'unrelated.xlsx')})).path,exportFile);
  assert.equal(reveals.at(-1),exportFile);
  const original=(await request('/api/state')).media[0];assert.ok(original);
+ assert.equal(original.product_name,productName.trim());
  const db=new DatabaseSync(join(dir,'reels.sqlite'));
  db.prepare('INSERT INTO jobs(id,page_id,media_id,due,created,status) VALUES(?,?,?,?,?,?)').run('retained-job','page',original.id,'2099-01-01','2026-01-01','remote_scheduled');
  // Also retain an unscheduled visible item, as encountered when closing the app mid-selection.
@@ -47,6 +48,7 @@ try{
  assert.equal((await request('/api/state')).media.length,0);
  await request('/api/videos/import',{paths:[file]});
  assert.equal((await request('/api/state')).media[0].id,original.id);
+ assert.equal((await request('/api/state')).media[0].product_name,productName.trim());
  const mapping=await request('/api/affiliate/inspect',{name:'aff.csv',data:Buffer.from('Original URL,Affiliate\nhttps://shopee.vn/product/1/2,https://s.shopee.vn/abc\n').toString('base64')});
  const input={mapping:{id:mapping.id,...mapping.suggestion}};
  assert.equal((await request('/api/affiliate/merge',input)).added,1);

@@ -13,6 +13,7 @@ const root = process.env.DATA_DIR || 'data'; mkdirSync(root,{recursive:true});
 const db = new DatabaseSync(`${root}/reels.sqlite`);
 db.exec('CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT)');
 db.exec('CREATE TABLE IF NOT EXISTS shopee_sources(path TEXT PRIMARY KEY,url TEXT NOT NULL,name TEXT NOT NULL)');
+db.exec('CREATE TABLE IF NOT EXISTS page_visibility(page_id TEXT PRIMARY KEY,hidden INTEGER NOT NULL DEFAULT 0 CHECK(hidden IN (0,1)))');
 async function masterPath(){
  const {ensureAffiliateMaster}=await import('./affiliate.mjs');
  const previous=resolve(root,'Tong-hop-affiliate.xlsx');
@@ -22,7 +23,8 @@ async function masterPath(){
 db.exec(`PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS pages(id TEXT PRIMARY KEY,name TEXT,token TEXT); CREATE TABLE IF NOT EXISTS media(id TEXT PRIMARY KEY,name TEXT,size INTEGER); CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,page_id TEXT,media_id TEXT,caption TEXT,due TEXT,status TEXT DEFAULT 'queued',video_id TEXT,error TEXT,created TEXT);`);
 // Additive migration preserves existing uploads and scheduled jobs.
 const columns = db.prepare('PRAGMA table_info(media)').all().map(c=>c.name);
-for (const [name,type] of [['path','TEXT'],['mtime','REAL'],['folder','TEXT'],['hidden','INTEGER DEFAULT 0']]) if (!columns.includes(name)) db.exec(`ALTER TABLE media ADD COLUMN ${name} ${type}`);
+for (const [name,type] of [['path','TEXT'],['mtime','REAL'],['folder','TEXT'],['hidden','INTEGER DEFAULT 0'],['product_name','TEXT']]) if (!columns.includes(name)) db.exec(`ALTER TABLE media ADD COLUMN ${name} ${type}`);
+db.exec("UPDATE media SET product_name=(SELECT name FROM shopee_sources WHERE path=media.path) WHERE (product_name IS NULL OR product_name='') AND EXISTS(SELECT 1 FROM shopee_sources WHERE path=media.path)");
 // Each app session starts with an empty selection; retain files and job references.
 db.exec('UPDATE media SET hidden=1 WHERE COALESCE(hidden,0)=0');
 const jobColumns=db.prepare('PRAGMA table_info(jobs)').all().map(c=>c.name);
@@ -50,7 +52,7 @@ function crypt(value, decrypt=false) {
  if (decrypt) {const [iv,tag,data]=value.split('.').map(x=>Buffer.from(x,'hex')); const c=createDecipheriv('aes-256-gcm',key,iv);c.setAuthTag(tag);return Buffer.concat([c.update(data),c.final()]).toString();}
  const iv=randomBytes(12),c=createCipheriv('aes-256-gcm',key,iv); const data=Buffer.concat([c.update(value),c.final()]); return [iv,c.getAuthTag(),data].map(x=>x.toString('hex')).join('.');
 }
-const commentService=createCommentService({db,meta,masterFile:resolve(process.env.AFFILIATE_MASTER_DIR||root,'Tong-hop-affiliate.xlsx'),getPage:id=>{const page=db.prepare('SELECT * FROM pages WHERE id=?').get(id);return page?{id:page.id,name:page.name,token:crypt(page.token,true)}:null;}});
+const commentService=createCommentService({db,meta,masterFile:resolve(process.env.AFFILIATE_MASTER_DIR||root,'Tong-hop-affiliate.xlsx'),getPage:id=>{const page=db.prepare('SELECT * FROM pages WHERE id=? AND id NOT IN (SELECT page_id FROM page_visibility WHERE hidden=1)').get(id);return page?{id:page.id,name:page.name,token:crypt(page.token,true)}:null;}});
 let shopeeState={running:false,message:'Chỉ hỗ trợ bản desktop Electron',downloaded:0};
 let shopeeImports=0;
 process.on('message',async message=>{
@@ -62,9 +64,11 @@ process.on('message',async message=>{
  if(message.type==='shopee-file'){shopeeImports++;try{
   const {files}=await selectVideos([message.path]);for(const file of files){
    if(message.url)db.prepare('INSERT INTO shopee_sources(path,url,name) VALUES(?,?,?) ON CONFLICT(path) DO UPDATE SET url=excluded.url,name=excluded.name').run(file.path,message.url,typeof message.productName==='string'&&message.productName.trim()?message.productName.trim():file.name.replace(/\.mp4$/i,''));
+   const productName=typeof message.productName==='string'?message.productName.trim():'';
+   if(productName)db.prepare('UPDATE media SET product_name=? WHERE path=?').run(productName,file.path);
    if(db.prepare('SELECT id FROM media WHERE path=? AND size=? AND mtime=?').get(file.path,file.size,file.mtime))continue;
    if(message.reused)continue;
-   db.prepare('INSERT INTO media(id,name,size,path,mtime,folder) VALUES(?,?,?,?,?,?)').run(randomBytes(16).toString('hex'),file.name,file.size,file.path,file.mtime,null);
+   db.prepare('INSERT INTO media(id,name,size,path,mtime,folder,product_name) VALUES(?,?,?,?,?,?,?)').run(randomBytes(16).toString('hex'),file.name,file.size,file.path,file.mtime,null,productName||null);
   }
  }catch(error){shopeeState.message='Đã tải nhưng không thêm được thư viện: '+error.message;}finally{shopeeImports--;}}
 });
@@ -80,7 +84,13 @@ const server=http.createServer(async(req,res)=>{try{
  if(req.method!=='GET' && req.headers['sec-fetch-site']==='cross-site')return json(res,403,{error:'Yêu cầu từ website khác bị chặn'});
  const allowedOrigins=new Set([new URL(base).origin]);if(process.env.DESKTOP_MODE==='1'){const port=server.address()?.port||process.env.PORT;allowedOrigins.add(`http://localhost:${port}`);allowedOrigins.add(`http://127.0.0.1:${port}`);}
  if(req.method!=='GET' && req.headers.origin && !allowedOrigins.has(req.headers.origin))return json(res,403,{error:'Origin không hợp lệ'});
- if(req.method==='GET' && url.pathname==='/api/state')return json(res,200,{configured:config(),pages:db.prepare('SELECT id,name FROM pages').all(),media:db.prepare('SELECT * FROM media WHERE COALESCE(hidden,0)=0').all(),jobs:db.prepare('SELECT jobs.*,pages.name AS page_name,media.name AS media_name FROM jobs LEFT JOIN pages ON pages.id=jobs.page_id LEFT JOIN media ON media.id=jobs.media_id WHERE COALESCE(jobs.history_hidden,0)=0 ORDER BY due DESC').all()});
+ if(req.method==='GET' && url.pathname==='/api/state')return json(res,200,{configured:config(),pages:db.prepare('SELECT id,name FROM pages WHERE id NOT IN (SELECT page_id FROM page_visibility WHERE hidden=1)').all(),hiddenPages:db.prepare('SELECT id,name FROM pages WHERE id IN (SELECT page_id FROM page_visibility WHERE hidden=1)').all(),media:db.prepare('SELECT * FROM media WHERE COALESCE(hidden,0)=0').all(),jobs:db.prepare('SELECT jobs.*,pages.name AS page_name,media.name AS media_name FROM jobs LEFT JOIN pages ON pages.id=jobs.page_id LEFT JOIN media ON media.id=jobs.media_id WHERE COALESCE(jobs.history_hidden,0)=0 ORDER BY due DESC').all()});
+ if(req.method==='POST' && url.pathname==='/api/pages/visibility'){
+  const {pageId,hidden}=JSON.parse(await body(req));
+  if(typeof pageId!=='string'||typeof hidden!=='boolean'||!db.prepare('SELECT id FROM pages WHERE id=?').get(pageId))throw Error('Chọn Page đã kết nối và trạng thái ẩn hợp lệ.');
+  db.prepare('INSERT INTO page_visibility(page_id,hidden) VALUES(?,?) ON CONFLICT(page_id) DO UPDATE SET hidden=excluded.hidden').run(pageId,hidden?1:0);
+  return json(res,200,{ok:true,pageId,hidden});
+ }
  if(url.pathname==='/auth/meta' && req.method==='GET'){
   if(!config())return json(res,400,{error:'Cần cấu hình Meta App, phiên bản API và khóa mã hóa trong .env'});
   const state=randomBytes(32).toString('hex');states.set(state,Date.now()+600000);for(const [k,v] of states)if(v<Date.now())states.delete(k);
@@ -98,6 +108,7 @@ const server=http.createServer(async(req,res)=>{try{
  }
  if(url.pathname==='/api/affiliate/master' && req.method==='GET')return json(res,200,{path:await masterPath()});
  if(url.pathname==='/api/affiliate-comments' && req.method==='GET')return json(res,200,commentService.snapshot(url.searchParams.get('id'),url.searchParams.get('offset')));
+ if(url.pathname==='/api/affiliate-comments/eligible' && req.method==='GET')return json(res,200,commentService.eligibleIds(url.searchParams.get('id')));
  if(url.pathname==='/api/affiliate-comments/scan' && req.method==='POST'){
   if(!config())throw Error('Cấu hình Meta chưa đầy đủ.');
   return json(res,202,await commentService.scan(JSON.parse(await body(req))));
@@ -183,7 +194,8 @@ const server=http.createServer(async(req,res)=>{try{
     // Keep previous file versions for old jobs; never silently substitute changed content.
     const duplicate=db.prepare('SELECT id FROM media WHERE path=? AND size=? AND mtime=?').get(file.path,file.size,file.mtime);
     if(duplicate){db.prepare('UPDATE media SET hidden=0 WHERE id=?').run(duplicate.id);existing++;continue;}
-    db.prepare('INSERT INTO media(id,name,size,path,mtime,folder) VALUES(?,?,?,?,?,?)').run(randomBytes(16).toString('hex'),file.name,file.size,file.path,file.mtime,scanned.folder);added++;
+    const productName=db.prepare('SELECT name FROM shopee_sources WHERE path=?').get(file.path)?.name||null;
+    db.prepare('INSERT INTO media(id,name,size,path,mtime,folder,product_name) VALUES(?,?,?,?,?,?,?)').run(randomBytes(16).toString('hex'),file.name,file.size,file.path,file.mtime,scanned.folder,productName);added++;
    }
    db.exec('COMMIT');
   }catch(error){db.exec('ROLLBACK');throw error;}
@@ -221,7 +233,7 @@ const server=http.createServer(async(req,res)=>{try{
   const remote=input.remote===true;
   if(remote && !config())throw Error('Cấu hình Meta chưa đầy đủ');
   if(remote && db.prepare("SELECT id FROM jobs WHERE status IN ('remote_queued','remote_uploading','remote_confirming') LIMIT 1").get())throw Error('Một lượt tải lên Meta đang chạy. Đợi lượt đó hoàn tất trước khi gửi thêm.');
-  if(!db.prepare('SELECT id FROM pages WHERE id=?').get(input.pageId || ''))throw Error('Chọn Page đã kết nối');
+  if(!db.prepare('SELECT id FROM pages WHERE id=? AND id NOT IN (SELECT page_id FROM page_visibility WHERE hidden=1)').get(input.pageId || ''))throw Error('Chọn Page đang hiển thị và đã kết nối');
   const custom=Array.isArray(input.items);
   if(custom)input.mediaIds=input.items.map(item=>item?.mediaId);
   if(!Array.isArray(input.mediaIds) || !input.mediaIds.length || input.mediaIds.length>1000 || input.mediaIds.some(id=>typeof id!=='string') || new Set(input.mediaIds).size!==input.mediaIds.length)throw Error('Chọn từ 1 đến 1000 video khác nhau');
@@ -258,7 +270,7 @@ const server=http.createServer(async(req,res)=>{try{
   return json(res,201,{ok:true,count:input.mediaIds.length,batchId,archiveWarnings});
  }
  if(url.pathname==='/api/jobs' && req.method==='POST'){
-  const input=JSON.parse(await body(req));if(!db.prepare('SELECT id FROM pages WHERE id=?').get(input.pageId || '') || !db.prepare('SELECT id FROM media WHERE id=? AND COALESCE(hidden,0)=0').get(input.mediaId || ''))throw new Error('Chọn Page đã kết nối và video');
+  const input=JSON.parse(await body(req));if(!db.prepare('SELECT id FROM pages WHERE id=? AND id NOT IN (SELECT page_id FROM page_visibility WHERE hidden=1)').get(input.pageId || '') || !db.prepare('SELECT id FROM media WHERE id=? AND COALESCE(hidden,0)=0').get(input.mediaId || ''))throw new Error('Chọn Page đang hiển thị, đã kết nối và video');
   const selected=db.prepare('SELECT * FROM media WHERE id=?').get(input.mediaId);if(selected.path)await checkUnchanged(selected);
   const due=new Date(input.due || Date.now());if(!Number.isFinite(due.getTime()) || typeof input.caption!=='string' || input.caption.length>2200)throw new Error('Lịch đăng hoặc caption không hợp lệ');
   let staged=[];db.exec('BEGIN');try{
@@ -280,7 +292,7 @@ const server=http.createServer(async(req,res)=>{try{
  if(url.pathname.startsWith('/api/jobs/') && req.method==='DELETE'){
   const result=db.prepare("UPDATE jobs SET status='cancelled' WHERE id=? AND status IN ('queued','remote_queued')").run(url.pathname.split('/').pop());return json(res,result.changes?200:409,{ok:!!result.changes});
  }
- if(req.method==='GET' && ['/', '/app.js','/quick.js','/style.css','/master-tabs.js','/master-view.html','/master-view.js','/master-view.css','/affiliate-comments.html','/affiliate-comments.js','/affiliate-comments.css'].includes(url.pathname)){const file=url.pathname==='/'?'index.html':url.pathname.slice(1);res.writeHead(200,{'Content-Type':file.endsWith('.html')?'text/html; charset=utf-8':file.endsWith('.js')?'text/javascript':'text/css','Content-Security-Policy':`default-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors ${['master-view.html','affiliate-comments.html'].includes(file)?"'self'":"'none'"}; base-uri 'self'; form-action 'self'`,'X-Content-Type-Options':'nosniff'});return res.end(readFileSync(fileURLToPath(new URL(`./public/${file}`,import.meta.url))));}
+ if(req.method==='GET' && ['/', '/app.js','/quick.js','/schedule-time.js','/upload-progress.js','/style.css','/master-tabs.js','/master-view.html','/master-view.js','/master-view.css','/affiliate-comments.html','/affiliate-comments.js','/affiliate-comments.css'].includes(url.pathname)){const file=url.pathname==='/'?'index.html':url.pathname.slice(1);res.writeHead(200,{'Content-Type':file.endsWith('.html')?'text/html; charset=utf-8':file.endsWith('.js')?'text/javascript':'text/css','Content-Security-Policy':`default-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors ${['master-view.html','affiliate-comments.html'].includes(file)?"'self'":"'none'"}; base-uri 'self'; form-action 'self'`,'X-Content-Type-Options':'nosniff'});return res.end(readFileSync(fileURLToPath(new URL(`./public/${file}`,import.meta.url))));}
  json(res,404,{error:'Không tìm thấy'});
  }catch(error){json(res,400,{error:error.message});}});
 let busy=false;

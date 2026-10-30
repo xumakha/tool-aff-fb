@@ -66,6 +66,27 @@ test('scan never posts, allows other-user comments, excludes own/unknown comment
  assert.ok(!JSON.stringify(state).includes('test-page-token'));
 }));
 
+test('select all returns eligible posts across table pages without posting',async()=>fixture(async({service,model})=>{
+ model.posts=Array.from({length:105},(_,i)=>post('1_'+(i+10)));
+ model.comments['1_10']=[{id:'1_80',from:{id:'1'},comment_count:0}];
+ model.comments['1_11']=[{id:'2_92',comment_count:0}];
+ model.posts[2]=post('1_12','Không khớp');
+ assert.throws(()=>service.eligibleIds('missing'));
+ const {runId}=await service.scan({pageId:'1',limit:200});
+ assert.throws(()=>service.eligibleIds(runId));
+ const state=await settled(service,runId);
+ assert.equal(state.items.length,100);assert.equal(service.snapshot(runId,100).items.length,5);
+ assert.deepEqual(service.eligibleIds(runId),{runId,pageId:'1',postIds:model.posts.slice(3).map(item=>item.id)});
+ assert.equal(model.writes.length,0);
+}));
+
+test('a real-style comment-read permission failure is reported separately and never becomes eligible',async()=>fixture(async({service,options,model})=>{
+ const original=options.meta.request;
+ options.meta.request=async(path,token,body)=>{if(!body&&path.includes('/comments?'))throw Object.assign(Error('Meta yêu cầu pages_read_user_content. Kết nối lại Facebook.'),{metaRejected:true,metaCode:10,requiredPermissions:['pages_read_user_content']});return original(path,token,body);};
+ const {runId}=await service.scan({pageId:'1'});const state=await settled(service,runId);
+ assert.equal(state.counts.permission,1);assert.equal(state.counts.unknown,undefined);assert.equal(state.counts.eligible,undefined);assert.equal(model.writes.length,0);
+}));
+
 test('rechecks before sending, posts exact column D once, and retains duplicate protection across restarts',async()=>fixture(async({service,model,options})=>{
  const {runId}=await service.scan({pageId:'1'});await settled(service,runId);
  await assert.rejects(service.start({runId,postIds:['1_10']}),/xác nhận/);

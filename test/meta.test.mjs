@@ -1,6 +1,12 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {Meta} from '../meta.mjs';
+test('comment read permission errors expose only the required permission and safe reconnect guidance',async()=>{
+ const meta=new Meta({version:'v99.0',fetcher:async()=>({ok:false,status:400,json:async()=>({error:{code:10,message:"This endpoint requires pages_read_user_content; private-token https://example.com/?secret=private-token"}})})});
+ await assert.rejects(meta.request('1_10/comments','private-token'),error=>{
+  assert.deepEqual(error.requiredPermissions,['pages_read_user_content']);assert.match(error.message,/kết nối lại/);assert.ok(!error.message.includes('private-token'));assert.ok(!error.message.includes('example.com'));return true;
+ });
+});
 test('server errors on comment POST remain uncertain, while explicit 4xx Graph errors are rejected',async()=>{
  for(const [status,rejected] of [[502,false],[400,true]]){
   const meta=new Meta({version:'v99.0',fetcher:async()=>({ok:false,status,json:async()=>({error:{code:200}})})});
